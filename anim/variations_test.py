@@ -210,7 +210,7 @@ def load_model_from_config(config, ckpt, verbose=False):
     if len(u) > 0 and verbose:
         print("unexpected keys:")
         print(u)
-
+    model = model.half()
     model.cuda()
     model.eval()
     return model
@@ -576,9 +576,10 @@ def transform_image_3d(prev_img_cv2, adabins_helper, midas_model, midas_transfor
         print(f"Estimating depth of {w}x{h} image with MiDaS...")
         sample = torch.from_numpy(img_midas_input).float().to(device).unsqueeze(0)
         #device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        if device == torch.device("cuda"):
-            sample = sample.to(memory_format=torch.channels_last)
-            sample = sample.half()
+        #if device == torch.device("cuda"):
+        sample = sample.to(memory_format=torch.channels_last)
+        sample = sample.half()
+
         midas_depth = midas_model.forward(sample)
         midas_depth = torch.nn.functional.interpolate(
             midas_depth.unsqueeze(1),
@@ -1061,14 +1062,12 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
             PrepareForNet()
         ])
 
-        print(f'model: {midas_transform}')
-        print(f'model: {midas_model}')
-
         midas_model.eval()
         if optimize:
             if device == torch.device("cuda"):
                 midas_model = midas_model.to(memory_format=torch.channels_last)
                 midas_model = midas_model.half()
+        midas_model = midas_model.half()
         midas_model.to(device)
         args.mtransform = midas_transform
 
@@ -1407,7 +1406,7 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
                         #if args.display_samples:
                         #    display.display(image)
                         index += 1
-                    if args.seed_behavior != 'fixed'
+                    if args.seed_behavior != 'fixed':
                         args.seed = next_seed(args)
 
             #print(len(all_images))
