@@ -47,7 +47,7 @@ sys.path.extend([
 
 
 import py3d_tools as p3d
-from helpers import save_samples, sampler_fn
+#from helpers import save_samples, sampler_fn
 from infer import InferenceHelper
 from k_diffusion import sampling
 from k_diffusion.external import CompVisDenoiser
@@ -196,28 +196,25 @@ def crash(e, s):
     t = threading.Timer(0.25, os._exit, args=[0])
     t.start()
 
-def load_model_from_config(config, ckpt, verbose=False, device='cpu', half_precision=True):
-    map_location = "cpu" #@param ["cpu", "cuda"]
+def load_model_from_config(config, ckpt, verbose=False):
     print(f"Loading model from {ckpt}")
-    pl_sd = torch.load(ckpt, map_location=map_location)
+    pl_sd = torch.load(ckpt, map_location="cpu")
     if "global_step" in pl_sd:
         print(f"Global Step: {pl_sd['global_step']}")
     sd = pl_sd["state_dict"]
     model = instantiate_from_config(config.model)
     m, u = model.load_state_dict(sd, strict=False)
     if len(m) > 0 and verbose:
-        print("missing args:")
+        print("missing keys:")
         print(m)
     if len(u) > 0 and verbose:
         print("unexpected keys:")
         print(u)
 
-    if half_precision:
-        model = model.half().to(device)
-    else:
-        model = model.to(device)
+    model.cuda()
     model.eval()
     return model
+
 
 model_config = "v1-inference.yaml" #@param ["custom","v1-inference.yaml"]
 model_checkpoint =  "model.ckpt" #@param ["custom","sd-v1-4-full-ema.ckpt","sd-v1-4.ckpt","sd-v1-3-full-ema.ckpt","sd-v1-3.ckpt","sd-v1-2-full-ema.ckpt","sd-v1-2.ckpt","sd-v1-1-full-ema.ckpt","sd-v1-1.ckpt"]
@@ -242,7 +239,7 @@ ckpt_config_path = custom_config_path if model_config == "custom" else os.path.j
 if os.path.exists(ckpt_config_path):
     print(f"{ckpt_config_path} exists")
 else:
-    ckpt_config_path = "/content/stable-diffusion/configs/stable-diffusion/v1-inference.yaml"
+    ckpt_config_path = "/content/stable-diffusion-gradio-anim-opt/configs/stable-diffusion/v1-inference.yaml"
 print(f"Using config: {ckpt_config_path}")
 
 # checkpoint path or download
@@ -962,7 +959,7 @@ def load_var_model_from_config(config_var, ckpt_var, device, verbose=False, half
     model_var.eval()
     return model_var
 ckpt_var="/gdrive/MyDrive/sd-clip-vit-l14-img-embed_ema_only.ckpt"
-config_var="sd_vars/stable-diffusion/configs/stable-diffusion/sd-image-condition-finetune.yaml"
+config_var="stable-diffusion-gradio-anim-opt/configs/stable-diffusion/sd-image-condition-finetune.yaml"
 config_var = OmegaConf.load(config_var)
 
 device='cpu'
@@ -971,7 +968,7 @@ device='cuda'
 def variations(input_im, outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_W, v_H, v_ddim_eta):
     #im_path="data/example_conditioning/superresolution/sample_0.jpg",
     ckpt_var="/gdrive/MyDrive/sd-clip-vit-l14-img-embed_ema_only.ckpt"
-    config_var="sd_vars/stable-diffusion/configs/stable-diffusion/sd-image-condition-finetune.yaml"
+    config_var="stable-diffusion-gradio-anim-opt/configs/stable-diffusion/sd-image-condition-finetune.yaml"
     outpath=outdir
     scale=v_cfg_scale
     h=v_H
