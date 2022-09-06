@@ -579,7 +579,7 @@ def transform_image_3d(prev_img_cv2, adabins_helper, midas_model, midas_transfor
         #if device == torch.device("cuda"):
         sample = sample.to(memory_format=torch.channels_last)
         sample = sample.half()
-
+        
         midas_depth = midas_model.forward(sample)
         midas_depth = torch.nn.functional.interpolate(
             midas_depth.unsqueeze(1),
