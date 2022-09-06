@@ -36,7 +36,7 @@ opt = parser.parse_args()
 sys.path.extend([
     '/content/src/taming-transformers',
     '/content/src/clip',
-    '/content/stable-diffusion/',
+    '/content/stable-diffusion-gradio-anim-opt/',
     '/content/k-diffusion',
     '/content/pytorch3d-lite',
     '/content/AdaBins',
@@ -47,7 +47,7 @@ sys.path.extend([
 
 
 import py3d_tools as p3d
-#from helpers import save_samples, sampler_fn
+from helpers import save_samples, sampler_fn
 from infer import InferenceHelper
 from k_diffusion import sampling
 from k_diffusion.external import CompVisDenoiser
@@ -269,7 +269,7 @@ if ckpt_valid:
 
 if load_on_run_all and ckpt_valid:
     local_config = OmegaConf.load(f"{ckpt_config_path}")
-    model = load_model_from_config(local_config, f"{ckpt_path}",half_precision=half_precision)
+    model = load_model_from_config(local_config, f"{ckpt_path}")
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     model = model.to("cpu")
 
@@ -899,8 +899,20 @@ def generate(args, return_latent=False, return_sample=False, return_c=False):
                     for x_sample in x_samples:
                         x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
                         image = Image.fromarray(x_sample.astype(np.uint8))
+                        if args.GFPGAN:
+                            image = FACE_RESTORATION(image, args.bg_upsampling, args.upscale).astype(np.uint8)
+                            image = Image.fromarray(image)
+                        else:
+                            image = image
+
+
                         results.append(image)
     return results
+
+
+
+
+
 
 def sample_model(input_im, model_var, sampler, precision, h, w, ddim_steps, n_samples, scale, ddim_eta):
     model_var.to("cuda")
