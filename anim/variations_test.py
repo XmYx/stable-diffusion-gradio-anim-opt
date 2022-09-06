@@ -1390,7 +1390,7 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
 
                 for image in init_array: # iterates the init images
                     args.init_image = image
-
+                    print(f'USING SEED FOR BATCH:{args.seed}')
                     results = generate(args)
                     for image in results:
                         #all_images.append(results[image])
@@ -1407,7 +1407,8 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
                         #if args.display_samples:
                         #    display.display(image)
                         index += 1
-                    args.seed = next_seed(args)
+                    if args.seed_behavior != 'fixed'
+                        args.seed = next_seed(args)
 
             #print(len(all_images))
         if args.make_grid:
@@ -1560,7 +1561,6 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
     arger(animation_prompts, prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode, init_img_array, use_mask, mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust)
     args = SimpleNamespace(**arger(animation_prompts, prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode, init_img_array, use_mask, mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust))
     args.outputs = []
-    print('InPaint arg: {init_img_array}')
     if args.animation_mode == 'None':
         args.max_frames = 1
 
@@ -1744,8 +1744,8 @@ with demo:
                           GFPGAN = gr.Checkbox(label='GFPGAN, Upscaler', value=False)
                           bg_upsampling = gr.Checkbox(label='BG Enhancement', value=False)
                           upscale = gr.Slider(minimum=1, maximum=8, step=1, label='Upscaler, 1 to turn off', value=1, interactive=True)
-                      W = gr.Slider(minimum=256, maximum=1024, step=64, label='Width', value=512, interactive=True)#width
-                      H = gr.Slider(minimum=256, maximum=1024, step=64, label='Height', value=512, interactive=True)#height
+                      W = gr.Slider(minimum=256, maximum=8192, step=64, label='Width', value=512, interactive=True)#width
+                      H = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)#height
                       steps = gr.Slider(minimum=1, maximum=300, step=1, label='Steps', value=100, interactive=True)#steps
                       scale = gr.Slider(minimum=1, maximum=25, step=1, label='Scale', value=11, interactive=True)#scale
                       video_init_path = gr.Textbox(label='Video init path',  placeholder='/content/video_in.mp4', lines=1)#video_init_path
@@ -1817,8 +1817,8 @@ with demo:
                     b_GFPGAN = gr.Checkbox(label='GFPGAN, Face Resto, Upscale', value=False)
                     b_bg_upsampling = gr.Checkbox(label='BG Enhancement', value=False)
                     b_upscale = gr.Slider(minimum=1, maximum=8, step=1, label='Upscaler, 1 to turn off', value=1, interactive=True)
-                    b_W = gr.Slider(minimum=256, maximum=1024, step=64, label='Width', value=512, interactive=True)#width
-                    b_H = gr.Slider(minimum=256, maximum=1024, step=64, label='Height', value=512, interactive=True)#height
+                    b_W = gr.Slider(minimum=256, maximum=8192, step=64, label='Width', value=512, interactive=True)#width
+                    b_H = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)#height
                     b_steps = gr.Slider(minimum=1, maximum=300, step=1, label='Steps', value=100, interactive=True)#steps
                     b_scale = gr.Slider(minimum=1, maximum=25, step=1, label='Scale', value=11, interactive=True)#scale
                     b_batch_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
@@ -1851,8 +1851,8 @@ with demo:
                         i_bg_upsampling = gr.Checkbox(label='BG Enhancement', value=False)
                         i_upscale = gr.Slider(minimum=1, maximum=8, step=1, label='Upscaler, 1 to turn off', value=1, interactive=True)
                     with gr.Row():
-                        i_W = gr.Slider(minimum=256, maximum=1024, step=64, label='Width', value=512, interactive=True)#width
-                        i_H = gr.Slider(minimum=256, maximum=1024, step=64, label='Height', value=512, interactive=True)#height
+                        i_W = gr.Slider(minimum=256, maximum=8192, step=64, label='Width', value=512, interactive=True)#width
+                        i_H = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)#height
                     i_steps = gr.Slider(minimum=1, maximum=300, step=1, label='Steps', value=100, interactive=True)#steps
                     i_scale = gr.Slider(minimum=1, maximum=25, step=1, label='Scale', value=11, interactive=True)#scale
                     use_mask = gr.Checkbox(label='Use Mask Path', value=True, visible=False) #@param {type:"boolean"}
@@ -1876,7 +1876,7 @@ with demo:
                     with gr.Row():
                         with gr.Column():
                             input_var = gr.Image()
-                            var_samples = gr.Slider(minimum=1, maximum=3, step=1, label='Samples (V100 = 3 x 512x512)', value=1)#n_samples
+                            var_samples = gr.Slider(minimum=1, maximum=8, step=1, label='Samples (V100 = 3 x 512x512)', value=1)#n_samples
                             var_plms = gr.Checkbox(label='PLMS (Off is DDIM)', value=True, visible=True, interactive=True)
                         output_var = gr.Gallery()
                     var_outdir = gr.Textbox(label='Output Folder',  value='/gdrive/MyDrive/variations', lines=1)
@@ -1888,8 +1888,8 @@ with demo:
                         v_steps = gr.Slider(minimum=1, maximum=300, step=1, label='Steps', value=100, interactive=True)#steps
 
                     with gr.Row():
-                        v_W = gr.Slider(minimum=256, maximum=1024, step=64, label='Width', value=512, interactive=True)#width
-                        v_H = gr.Slider(minimum=256, maximum=1024, step=64, label='Height', value=512, interactive=True)#height
+                        v_W = gr.Slider(minimum=256, maximum=8192, step=64, label='Width', value=512, interactive=True)#width
+                        v_H = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)#height
 
                     var_btn = gr.Button('Variations')
         with gr.TabItem('NoodleSoup'):
