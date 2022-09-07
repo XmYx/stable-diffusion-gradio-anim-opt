@@ -27,10 +27,13 @@ from io import BytesIO
 import fire
 import gc
 
-
 parser = argparse.ArgumentParser()
 parser.add_argument("--gpu", type=int, help="choose which GPU to use if you have multiple", default=0)
 parser.add_argument("--cli", type=str, help="don't launch web server, take Python function kwargs from this file.", default=None)
+parser.add_argument("--ckpt", type=str, help="Model Path", default=None)
+parser.add_argument("--no_var", type=str, help="Variations Model Path", default=None)
+parser.add_argument("--var_ckpt", type=str, help="Variations Model Path", default=None)
+
 opt = parser.parse_args()
 
 sys.path.extend([
@@ -43,8 +46,6 @@ sys.path.extend([
     '/content/MiDaS',
     '/content/soup'
 ])
-
-
 
 import py3d_tools as p3d
 from helpers import save_samples, sampler_fn
@@ -59,7 +60,7 @@ from midas.transforms import Resize, NormalizeImage, PrepareForNet
 
 import nsp_pantry
 from nsp_pantry import nspterminology, nsp_parse
-models_path = "/gdrive/MyDrive/" #@param {type:"string"}
+models_path = opt.ckpt #@param {type:"string"}
 output_path = "/content/output" #@param {type:"string"}
 
 mount_google_drive = False #@param {type:"boolean"}Will Remove
@@ -217,7 +218,7 @@ def load_model_from_config(config, ckpt, verbose=False):
 
 
 model_config = "v1-inference.yaml" #@param ["custom","v1-inference.yaml"]
-model_checkpoint =  "model.ckpt" #@param ["custom","sd-v1-4-full-ema.ckpt","sd-v1-4.ckpt","sd-v1-3-full-ema.ckpt","sd-v1-3.ckpt","sd-v1-2-full-ema.ckpt","sd-v1-2.ckpt","sd-v1-1-full-ema.ckpt","sd-v1-1.ckpt"]
+model_checkpoint =  "sd-v1-4.ckpt" #@param ["custom","sd-v1-4-full-ema.ckpt","sd-v1-4.ckpt","sd-v1-3-full-ema.ckpt","sd-v1-3.ckpt","sd-v1-2-full-ema.ckpt","sd-v1-2.ckpt","sd-v1-1-full-ema.ckpt","sd-v1-1.ckpt"]
 custom_config_path = "" #@param {type:"string"}
 custom_checkpoint_path = "" #@param {type:"string"}
 check_sha256 = False #@param {type:"boolean"}
@@ -641,132 +642,6 @@ def transform_image_3d(prev_img_cv2, adabins_helper, midas_model, midas_transfor
     ).cpu().numpy().astype(np.uint8)
     return result
 
-'''
-def generate(args, return_latent=False, return_sample=False, return_c=False):
-
-
-    torch_gc()
-    results = []
-    # start time after garbage collection (or before?)
-    start_time = time.time()
-
-    mem_mon = MemUsageMonitor('MemMon')
-    mem_mon.start()
-
-    seed_everything(args.seed)
-    os.makedirs(args.outdir, exist_ok=True)
-
-    if args.sampler == 'plms':
-        sampler = PLMSSampler(model)
-    else:
-        sampler = DDIMSampler(model)
-
-    model_wrap = CompVisDenoiser(model)
-    batch_size = args.n_samples
-    prompt = args.prompt
-    assert prompt is not None
-    data = [batch_size * [prompt]]
-
-    init_latent = None
-    if args.init_latent is not None:
-        init_latent = args.init_latent
-    elif args.init_sample is not None:
-        init_latent = model.get_first_stage_encoding(model.encode_first_stage(args.init_sample))
-    elif args.init_image != None and args.init_image != '':
-        init_image = load_img(args.init_image, shape=(args.W, args.H)).to(device)
-        init_image = repeat(init_image, '1 ... -> b ...', b=batch_size)
-        init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_image))  # move to latent space
-
-    sampler.make_schedule(ddim_num_steps=args.steps, ddim_eta=args.ddim_eta, verbose=False)
-
-    t_enc = int((1.0-args.strength) * args.steps)
-
-    start_code = None
-    if args.fixed_code and init_latent == None:
-        start_code = torch.randn([args.n_samples, args.C, args.H // args.f, args.W // args.f], device=device)
-
-    callback = make_callback(sampler=args.sampler,
-                            dynamic_threshold=args.dynamic_threshold,
-                            static_threshold=args.static_threshold)
-
-
-    precision_scope = autocast if args.precision == "autocast" else nullcontext
-    with torch.no_grad():
-        with precision_scope("cuda"):
-            with model.ema_scope():
-                for prompts in data:
-                    uc = None
-                    if args.scale != 1.0:
-                        uc = model.get_learned_conditioning(batch_size * [""])
-                    if isinstance(prompts, tuple):
-                        prompts = list(prompts)
-                    c = model.get_learned_conditioning(prompts)
-
-                    if args.init_c != None:
-                        c = args.init_c
-
-                    if args.sampler in ["klms","dpm2","dpm2_ancestral","heun","euler","euler_ancestral"]:
-                        samples = sampler_fn(
-                            c=c,
-                            uc=uc,
-                            args=args,
-                            model_wrap=model_wrap,
-                            init_latent=init_latent,
-                            t_enc=t_enc,
-                            device=device,
-                            cb=callback)
-                    else:
-
-                        if init_latent != None:
-                            z_enc = sampler.stochastic_encode(init_latent, torch.tensor([t_enc]*batch_size).to(device))
-                            samples = sampler.decode(z_enc, c, t_enc, unconditional_guidance_scale=args.scale,
-                                                    unconditional_conditioning=uc,)
-                        else:
-                            if args.sampler == 'plms' or args.sampler == 'ddim':
-                                shape = [args.C, args.H // args.f, args.W // args.f]
-                                samples, _ = sampler.sample(S=args.steps,
-                                                                conditioning=c,
-                                                                batch_size=args.n_samples,
-                                                                shape=shape,
-                                                                verbose=False,
-                                                                unconditional_guidance_scale=args.scale,
-                                                                unconditional_conditioning=uc,
-                                                                eta=args.ddim_eta,
-                                                                x_T=start_code,
-                                                                img_callback=callback)
-
-                    if return_latent:
-                        results.append(samples.clone())
-
-                    x_samples = model.decode_first_stage(samples)
-                    if return_sample:
-                        results.append(x_samples.clone())
-
-                    x_samples = torch.clamp((x_samples + 1.0) / 2.0, min=0.0, max=1.0)
-
-                    if return_c:
-                        results.append(c.clone())
-
-                    for x_sample in x_samples:
-                        x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
-                        image = Image.fromarray(x_sample.astype(np.uint8))
-
-                        if args.GFPGAN:
-                            image = FACE_RESTORATION(image, args.bg_upsampling, args.upscale).astype(np.uint8)
-                            image = Image.fromarray(image)
-                        else:
-                            image = image
-                        results.append(image)
-
-#save(pt, format = 'JPEG', optimize = True)
-#Image.fromarray(FACE_RESTORATION(output_images[i][k], bg_upsampling, upscale, GFPGANth).astype(np.uint8))
-
-    torch_gc()
-    return results
-'''
-
-
-
 def generate(args, return_latent=False, return_sample=False, return_c=False):
 
 
@@ -910,11 +785,6 @@ def generate(args, return_latent=False, return_sample=False, return_c=False):
                         results.append(image)
     return results
 
-
-
-
-
-
 def sample_model(input_im, model_var, sampler, precision, h, w, ddim_steps, n_samples, scale, ddim_eta):
     model_var.to("cuda")
     precision_scope = autocast if precision=="autocast" else nullcontext
@@ -971,13 +841,13 @@ def load_var_model_from_config(config_var, ckpt_var, device, verbose=False, half
     model_var.half().to(device)
     model_var.eval()
     return model_var
-ckpt_var="/gdrive/MyDrive/sd-clip-vit-l14-img-embed_ema_only.ckpt"
+#ckpt_var="/gdrive/MyDrive/sd-clip-vit-l14-img-embed_ema_only.ckpt"
 config_var="stable-diffusion-gradio-anim-opt/configs/stable-diffusion/sd-image-condition-finetune.yaml"
 config_var = OmegaConf.load(config_var)
 
-device='cpu'
-model_var = load_var_model_from_config(config_var, ckpt_var, device)
-device='cuda'
+if not opt.no_var:
+    model_var = load_var_model_from_config(config_var, opt.var_ckpt, 'cpu')
+
 def variations(input_im, outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_W, v_H, v_ddim_eta, v_GFPGAN, v_bg_upsampling, v_upscale):
     #im_path="data/example_conditioning/superresolution/sample_0.jpg",
     ckpt_var="/gdrive/MyDrive/sd-clip-vit-l14-img-embed_ema_only.ckpt"
@@ -1633,6 +1503,7 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
         #    time.sleep(1)
         torch_gc()
         return args.outputs
+
 def refresh(choice):
     print(choice)
     #choice = None
@@ -1642,6 +1513,7 @@ torch_gc()
 inPaint=None
 
 demo = gr.Blocks()
+
 soup_help1 = """
   ##                     Adjective Types\n
   * _adj-architecture_ - A list of architectural adjectives and styles
@@ -1694,6 +1566,18 @@ soup_help2 ="""
   * _focal-length_ - A list of focal length ranges
   * _photo-term_ - A list of photography terms relating to photos
   """
+
+
+print(f'I-------------------------------------------------I')
+print(f'I            Stable Diffusion started             I')
+print(f'I-------------------------------------------------I')
+print(f'I          Please go to ngrok.com to              I')
+print(f'I        find your URL to this session.           I')
+print(f'Ihttps://dashboard.ngrok.com/cloud-edge/endpoints I')
+print(f'I-------------------------------------------------I')
+
+
+
 
 
 with demo:
@@ -2050,5 +1934,3 @@ if __name__ == '__main__':
         launch_server()
     #else:
     #    run_headless()
-
-#demo.launch(debug=False, share=True)

@@ -270,20 +270,6 @@ if load_on_run_all and ckpt_valid:
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     model = model.to("cpu")
 
-def arger(animation_prompts, prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode, init_img_array, use_mask, mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust):
-
-    precision = 'autocast'
-    fixed_code = True
-    C = 4
-    f = 8
-    dynamic_threshold = None
-    static_threshold = None
-    prompt = ""
-    timestring = ""
-    init_latent = None
-    init_sample = None
-    init_c = None
-    return locals()
 
 def FACE_RESTORATION(image, bg_upsampling, upscale):
     from basicsr.archs.rrdbnet_arch import RRDBNet
@@ -520,6 +506,25 @@ def makevideo(args):
         #mp4 = open(mp4_path,'rb').read()
         #data_url = "data:video/mp4;base64," + b64encode(mp4).decode()
         #display.display( display.HTML(f'<video controls loop><source src="{data_url}" type="video/mp4"></video>') )
+
+def get_inbetweens(key_frames, integer=False, interp_method='Linear'):
+    key_frame_series = pd.Series([np.nan for a in range(args.max_frames)])
+
+    for i, value in key_frames.items():
+        key_frame_series[i] = value
+    key_frame_series = key_frame_series.astype(float)
+
+    if interp_method == 'Cubic' and len(key_frames.items()) <= 3:
+      interp_method = 'Quadratic'
+    if interp_method == 'Quadratic' and len(key_frames.items()) <= 2:
+      interp_method = 'Linear'
+
+    key_frame_series[0] = key_frame_series[key_frame_series.first_valid_index()]
+    key_frame_series[args.max_frames-1] = key_frame_series[key_frame_series.last_valid_index()]
+    key_frame_series = key_frame_series.interpolate(method=interp_method.lower(),limit_direction='both')
+    if integer:
+        return key_frame_series.astype(int)
+    return key_frame_series
 
 def transform_image_3d(prev_img_cv2, adabins_helper, midas_model, midas_transform, rot_mat, translate, args):
     # adapted and optimized version of transform_image_3d from Disco Diffusion https://github.com/alembics/disco-diffusion
@@ -845,6 +850,27 @@ device='cpu'
 model_var = load_var_model_from_config(config_var, ckpt_var, device)
 device='cuda'
 
+
+def parse_key_frames(string, prompt_parser=None):
+    import re
+    pattern = r'((?P<frame>[0-9]+):[\s]*[\(](?P<param>[\S\s]*?)[\)])'
+    frames = dict()
+    for match_object in re.finditer(pattern, string):
+        frame = int(match_object.groupdict()['frame'])
+        param = match_object.groupdict()['param']
+        if prompt_parser:
+            frames[frame] = prompt_parser(param)
+        else:
+            frames[frame] = param
+    if frames == {} and len(string) != 0:
+        raise RuntimeError('Key Frame string not correctly formatted')
+    return frames
+
+def render_image_batch(batch_args):
+        #    display.clear_output(wait=True)
+        #    display.display(grid_image)
+
+
 def variations(input_im, outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_W, v_H, v_ddim_eta, v_GFPGAN, v_bg_upsampling, v_upscale):
     #im_path="data/example_conditioning/superresolution/sample_0.jpg",
     ckpt_var="/gdrive/MyDrive/sd-clip-vit-l14-img-embed_ema_only.ckpt"
@@ -899,21 +925,144 @@ def variations(input_im, outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_
     torch_gc()
     return paths
 
-def batch(b_prompts, b_name, b_outdir, b_max_frames, b_GFPGAN, b_bg_upsampling, b_upscale, b_W, b_H, b_steps, b_scale, b_seed_behavior, b_seed, b_sampler, b_save_grid, b_save_settings, b_save_samples, b_n_batch, n_samples, b_ddim_eta, b_use_init, b_init_image, b_strength, b_make_grid):
-    
+def batch_dict(def run_batch(b_prompts, b_name, b_outdir, b_max_frames, b_GFPGAN, b_bg_upsampling, b_upscale, b_W, b_H, b_steps, b_scale, b_seed_behavior, b_seed, b_sampler, b_save_grid, b_save_settings, b_save_samples, b_n_batch, b_n_samples, b_ddim_eta, b_use_init, b_init_image, b_strength, b_make_grid):
+    return locals()
+
+def run_batch(b_prompts, b_name, b_outdir, b_max_frames, b_GFPGAN, b_bg_upsampling, b_upscale, b_W, b_H, b_steps, b_scale, b_seed_behavior, b_seed, b_sampler, b_save_grid, b_save_settings, b_save_samples, b_n_batch, b_n_samples, b_ddim_eta, b_use_init, b_init_image, b_strength, b_make_grid):
+
+        batchargs = SimpleNamespace(**batch_dict(b_prompts,
+                                                b_name,
+                                                b_outdir,
+                                                b_max_frames,
+                                                b_GFPGAN,
+                                                b_bg_upsampling,
+                                                b_upscale,
+                                                b_W,
+                                                b_H,
+                                                b_steps,
+                                                b_scale,
+                                                b_seed_behavior,
+                                                b_seed,
+                                                b_sampler,
+                                                b_save_grid,
+                                                b_save_settings,
+                                                b_save_samples,
+                                                b_n_batch,
+                                                b_n_samples,
+                                                b_ddim_eta,
+                                                b_use_init,
+                                                b_init_image,
+                                                b_strength,
+                                                b_make_grid))
+
+        model.to('cuda')
+        #b_prompts = prompts
+
+        b_prompts = list(b_animation_prompts.split("\n"))
+        # create output folder for the batch
+        os.makedirs(b_outdir, exist_ok=True)
+        if b_save_settings or b_save_samples:
+            print(f"Saving to {os.path.join(b_outdir, b_timestring)}_*")
+
+        # save settings for the batch
+        #if b_save_settings:
+        #    filename = os.path.join(b_outdir, f"{b_timestring}_settings.txt")
+        #    with open(filename, "w+", encoding="utf-8") as f:
+        #        json.dump(dict(b___dict__), f, ensure_ascii=False, indent=4)
+
+        index = 0
+        all_images = []
+        # function for init image batching
+        init_array = []
+
+        if b_init_img_array != None:
+            initdir = f'{b_outdir}/init'
+            os.makedirs(initdir, exist_ok=True)
+            b_init_image = f'{b_outdir}/init/init.png'
+            b_mask_file = f'{b_outdir}/init/mask.png'
+            b_init_img_array['image'].save(os.path.join(b_outdir, b_init_image))
+            b_init_img_array['mask'].save(os.path.join(b_outdir, b_mask_file))
+
+        if b_use_init:
+            if b_init_image == "":
+                raise FileNotFoundError("No path was given for init_image")
+            if b_init_image.startswith('http://') or b_init_image.startswith('https://'):
+                init_array.append(b_init_image)
+            elif not os.path.isfile(b_init_image):
+                if b_init_image[-1] != "/": # avoids path error by adding / to end if not there
+                    b_init_image += "/"
+                for image in sorted(os.listdir(b_init_image)): # iterates dir and appends images to init_array
+                    if image.split(".")[-1] in ("png", "jpg", "jpeg"):
+                        init_array.append(b_init_image + image)
+            else:
+                init_array.append(b_init_image)
+        else:
+            init_array = [""]
+
+        # when doing large batches don't flood browser with images
+        #clear_between_batches = b_n_batch >= 32
+
+        for iprompt, prompt in enumerate(b_prompts):
+            b_prompt = b_prompts[iprompt]
+
+
+
+            for batch_index in range(b_n_batch):
+                #if clear_between_batches:
+                #    display.clear_output(wait=True)
+                #print(f"Batch {batch_index+1} of {b_n_batch}")
+
+                for image in init_array: # iterates the init images
+                    b_init_image = image
+                    print(f'USING SEED FOR BATCH:{b_seed}')
+                    results = generate(args)
+                    for image in results:
+                        #all_images.append(results[image])
+                        if b_make_grid:
+                            all_images.append(T.functional.pil_to_tensor(image))
+                        if b_save_samples:
+                            print(f"Filename: {b_timestring}_{index:05}_{b_seed}.png")
+                            print(f"{b_outdir}/{b_timestring}_{index:05}_{b_seed}.png")
+                            filename = f"{b_timestring}_{index:05}_{b_seed}.png"
+                            fpath = f"{b_outdir}/{b_timestring}_{index:05}_{b_seed}.png"
+                            image.save(os.path.join(b_outdir, filename))
+                            b_outputs.append(fpath)
+                            print(f"Filepath List: {b_outputs}")
+                        #if b_display_samples:
+                        #    display.display(image)
+                        index += 1
+                    if b_seed_behavior != 'fixed':
+                        b_seed = next_seed(args)
+
+            #print(len(all_images))
+        if b_make_grid:
+            b_grid_rows = 2
+            grid = mkgrid(all_images, nrow=int(len(all_images)/b_grid_rows))
+            grid = rearrange(grid, 'c h w -> h w c').cpu().numpy()
+            filename = f"{b_timestring}_{iprompt:05d}_grid_{b_seed}.png"
+            grid_image = Image.fromarray(grid.astype(np.uint8))
+            grid_image.save(os.path.join(b_outdir, filename))
+            gpath = f"{b_outdir}/{b_timestring}_{iprompt:05d}_grid_{b_seed}.png"
+            b_outputs.append(gpath)
+
+def anim_dict(animation_prompts, prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode, init_img_array, use_mask, mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust):
+
+    precision = 'autocast'
+    fixed_code = True
+    C = 4
+    f = 8
+    dynamic_threshold = None
+    static_threshold = None
+    prompt = ""
+    timestring = ""
+    init_latent = None
+    init_sample = None
+    init_c = None
+    return locals()
 
 
 def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts: str, batch_name: str, outdir: str, max_frames: int, GFPGAN: bool, bg_upsampling: bool, upscale: int, W: int, H: int, steps: int, scale: int, angle: str, zoom: str, translation_x: str, translation_y: str, translation_z: str, rotation_3d_x: str, rotation_3d_y: str, rotation_3d_z: str, use_depth_warping: bool, midas_weight: float, near_plane: int, far_plane: int, fov: int, padding_mode: str, sampling_mode: str, seed_behavior: str, seed: str, interp_spline: str, noise_schedule: str, strength_schedule: str, contrast_schedule: str, sampler: str, extract_nth_frame: int, interpolate_x_frames: int, border: str, color_coherence: str, previous_frame_noise: float, previous_frame_strength: float, video_init_path: str, save_grid: bool, save_settings: bool, save_samples: bool, display_samples: bool, n_batch: int, n_samples: int, ddim_eta: float, use_init: bool, init_image: str, strength: float, timestring: str, resume_from_timestring: bool, resume_timestring: str, make_grid: bool, init_img_array, use_mask, mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust):
 
-
-
-
-
-    model.to('cuda')
-
-
-
-    torch_gc()
     images = []
     results = []
 
@@ -998,40 +1147,6 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
         args.noise_schedule_series = get_inbetweens(parse_key_frames(args.noise_schedule))
         args.strength_schedule_series = get_inbetweens(parse_key_frames(args.strength_schedule))
         args.contrast_schedule_series = get_inbetweens(parse_key_frames(args.contrast_schedule))
-
-    def parse_key_frames(string, prompt_parser=None):
-        import re
-        pattern = r'((?P<frame>[0-9]+):[\s]*[\(](?P<param>[\S\s]*?)[\)])'
-        frames = dict()
-        for match_object in re.finditer(pattern, string):
-            frame = int(match_object.groupdict()['frame'])
-            param = match_object.groupdict()['param']
-            if prompt_parser:
-                frames[frame] = prompt_parser(param)
-            else:
-                frames[frame] = param
-        if frames == {} and len(string) != 0:
-            raise RuntimeError('Key Frame string not correctly formatted')
-        return frames
-
-    def get_inbetweens(key_frames, integer=False, interp_method='Linear'):
-        key_frame_series = pd.Series([np.nan for a in range(args.max_frames)])
-
-        for i, value in key_frames.items():
-            key_frame_series[i] = value
-        key_frame_series = key_frame_series.astype(float)
-
-        if interp_method == 'Cubic' and len(key_frames.items()) <= 3:
-          interp_method = 'Quadratic'
-        if interp_method == 'Quadratic' and len(key_frames.items()) <= 2:
-          interp_method = 'Linear'
-
-        key_frame_series[0] = key_frame_series[key_frame_series.first_valid_index()]
-        key_frame_series[args.max_frames-1] = key_frame_series[key_frame_series.last_valid_index()]
-        key_frame_series = key_frame_series.interpolate(method=interp_method.lower(),limit_direction='both')
-        if integer:
-            return key_frame_series.astype(int)
-        return key_frame_series
 
     def render_animation(args):
         prom = args.animation_prompts
@@ -1190,116 +1305,6 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
         rot_mat = np.vstack([rot_mat, [0,0,1]])
         return np.matmul(rot_mat, trans_mat)
 
-    def parse_key_frames(string, prompt_parser=None):
-        import re
-        pattern = r'((?P<frame>[0-9]+):[\s]*[\(](?P<param>[\S\s]*?)[\)])'
-        frames = dict()
-        for match_object in re.finditer(pattern, string):
-            frame = int(match_object.groupdict()['frame'])
-            param = match_object.groupdict()['param']
-            if prompt_parser:
-                frames[frame] = prompt_parser(param)
-            else:
-                frames[frame] = param
-        if frames == {} and len(string) != 0:
-            raise RuntimeError('Key Frame string not correctly formatted')
-        return frames
-
-    def render_image_batch(args):
-        model.to('cuda')
-        #args.prompts = prompts
-
-        args.prompts = list(args.animation_prompts.split("\n"))
-        # create output folder for the batch
-        os.makedirs(args.outdir, exist_ok=True)
-        if args.save_settings or args.save_samples:
-            print(f"Saving to {os.path.join(args.outdir, args.timestring)}_*")
-
-        # save settings for the batch
-        #if args.save_settings:
-        #    filename = os.path.join(args.outdir, f"{args.timestring}_settings.txt")
-        #    with open(filename, "w+", encoding="utf-8") as f:
-        #        json.dump(dict(args.__dict__), f, ensure_ascii=False, indent=4)
-
-        index = 0
-        all_images = []
-        # function for init image batching
-        init_array = []
-
-        if args.init_img_array != None:
-            initdir = f'{args.outdir}/init'
-            os.makedirs(initdir, exist_ok=True)
-            args.init_image = f'{args.outdir}/init/init.png'
-            args.mask_file = f'{args.outdir}/init/mask.png'
-            args.init_img_array['image'].save(os.path.join(args.outdir, args.init_image))
-            args.init_img_array['mask'].save(os.path.join(args.outdir, args.mask_file))
-
-        if args.use_init:
-            if args.init_image == "":
-                raise FileNotFoundError("No path was given for init_image")
-            if args.init_image.startswith('http://') or args.init_image.startswith('https://'):
-                init_array.append(args.init_image)
-            elif not os.path.isfile(args.init_image):
-                if args.init_image[-1] != "/": # avoids path error by adding / to end if not there
-                    args.init_image += "/"
-                for image in sorted(os.listdir(args.init_image)): # iterates dir and appends images to init_array
-                    if image.split(".")[-1] in ("png", "jpg", "jpeg"):
-                        init_array.append(args.init_image + image)
-            else:
-                init_array.append(args.init_image)
-        else:
-            init_array = [""]
-
-        # when doing large batches don't flood browser with images
-        clear_between_batches = args.n_batch >= 32
-
-        for iprompt, prompt in enumerate(args.prompts):
-            args.prompt = args.prompts[iprompt]
-
-
-
-            for batch_index in range(args.n_batch):
-                #if clear_between_batches:
-                #    display.clear_output(wait=True)
-                #print(f"Batch {batch_index+1} of {args.n_batch}")
-
-                for image in init_array: # iterates the init images
-                    args.init_image = image
-                    print(f'USING SEED FOR BATCH:{args.seed}')
-                    results = generate(args)
-                    for image in results:
-                        #all_images.append(results[image])
-                        if args.make_grid:
-                            all_images.append(T.functional.pil_to_tensor(image))
-                        if args.save_samples:
-                            print(f"Filename: {args.timestring}_{index:05}_{args.seed}.png")
-                            print(f"{args.outdir}/{args.timestring}_{index:05}_{args.seed}.png")
-                            filename = f"{args.timestring}_{index:05}_{args.seed}.png"
-                            fpath = f"{args.outdir}/{args.timestring}_{index:05}_{args.seed}.png"
-                            image.save(os.path.join(args.outdir, filename))
-                            args.outputs.append(fpath)
-                            print(f"Filepath List: {args.outputs}")
-                        #if args.display_samples:
-                        #    display.display(image)
-                        index += 1
-                    if args.seed_behavior != 'fixed':
-                        args.seed = next_seed(args)
-
-            #print(len(all_images))
-        if args.make_grid:
-            args.grid_rows = 2
-            grid = mkgrid(all_images, nrow=int(len(all_images)/args.grid_rows))
-            grid = rearrange(grid, 'c h w -> h w c').cpu().numpy()
-            filename = f"{args.timestring}_{iprompt:05d}_grid_{args.seed}.png"
-            grid_image = Image.fromarray(grid.astype(np.uint8))
-            grid_image.save(os.path.join(args.outdir, filename))
-            gpath = f"{args.outdir}/{args.timestring}_{iprompt:05d}_grid_{args.seed}.png"
-            args.outputs.append(gpath)
-            #    display.clear_output(wait=True)
-            #    display.display(grid_image)
-
-
-
     def render_input_video(args):
         # create a folder for the video input frames to live in
         video_in_frame_path = os.path.join(args.outdir, 'inputframes')
@@ -1427,14 +1432,16 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
         #clear init_c
         args.init_c = None
 
-
-
     #animation_prompts = dict(zip(new_key, new_prom))
     print (prompts)
     print (animation_prompts)
     #animation_mode = animation_mode
-    arger(animation_prompts, prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode, init_img_array, use_mask, mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust)
-    args = SimpleNamespace(**arger(animation_prompts, prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode, init_img_array, use_mask, mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust))
+    anim_dict(animation_prompts, prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode, init_img_array, use_mask, mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust)
+
+
+    anim_args = SimpleNamespace(**arger(animation_prompts, prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode, init_img_array, use_mask, mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust))
+
+
     args.outputs = []
     if args.animation_mode == 'None':
         args.max_frames = 1
