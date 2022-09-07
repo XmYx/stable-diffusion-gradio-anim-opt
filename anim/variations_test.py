@@ -1502,6 +1502,7 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
         #while(torch.cuda.memory_allocated()/1e6 >= mem):
         #    time.sleep(1)
         torch_gc()
+        session_outputs.append(args.outputs)
         return args.outputs
 
 def refresh(choice):
@@ -1577,7 +1578,7 @@ print(f'Ihttps://dashboard.ngrok.com/cloud-edge/endpoints I')
 print(f'I-------------------------------------------------I')
 
 
-
+session_outputs = []
 
 
 with demo:
@@ -1762,6 +1763,10 @@ with demo:
                 with gr.Column():
                     with gr.Row():
                         with gr.Column():
+                            i_session_files = gr.Dropdown(label='Session Outputs',
+                                                              choices=session_outputs,
+                                                              value='None',
+                                                              visible=True)
                             input_var = gr.Image()
                             var_samples = gr.Slider(minimum=1, maximum=8, step=1, label='Samples (V100 = 3 x 512x512)', value=1)#n_samples
                             var_plms = gr.Checkbox(label='PLMS (Off is DDIM)', value=True, visible=True, interactive=True)
@@ -1890,7 +1895,7 @@ class ServerLauncher(threading.Thread):
             #'share': opt.share
         }
         #if not opt.share:
-        #demo.queue(concurrency_count=1)
+        demo.queue(concurrency_count=1)
         #if opt.share and opt.share_password:
         #    gradio_params['auth'] = ('webui', opt.share_password)
         self.demo.launch(**gradio_params)
