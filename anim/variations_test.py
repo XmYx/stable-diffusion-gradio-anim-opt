@@ -1909,7 +1909,7 @@ with demo:
                   with gr.Column():
                       gr.Markdown(value=soup_help2)
 
-    var_inputs = [input_var, var_outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_W, v_H, v_ddim_eta]
+    var_inputs = [input_var, var_outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_W, v_H, v_ddim_eta, v_GFPGAN, v_bg_upsampling, v_upscale]
     var_outputs = [output_var]
 
     soup_inputs = [input_prompt]
