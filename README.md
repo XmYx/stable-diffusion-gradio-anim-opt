@@ -3,9 +3,7 @@
 
 # Stable Diffusion Colab including HLKY's WebUI, and Deforum's animation WebUI, both running GradIO and ngrok
 
-English Notebook:
 https://github.com/XmYx/stable-diffusion-gradio-anim-opt/blob/main/P_HLKY_Deforum_StableDiffusion_GradIO_Colab.ipynb
-
 
 Credits to HLKY, Deforum, Mimocro, Altyrne, Doggettx, Justinpinkey
 
