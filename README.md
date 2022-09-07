@@ -8,15 +8,7 @@ https://github.com/XmYx/stable-diffusion-gradio-anim-opt/blob/main/P_HLKY_Deforu
 Credits to HLKY, Deforum, Mimocro, Altyrne, Doggettx, Justinpinkey
 
 
-At the last cell
-![colab](assets/Colab.png)
-Supports GFPGAN to fix faces and upscale.
-![gui](assets/Gui.png)
-Based on https://github.com/harubaru/waifu-diffusion/ and https://rentry.org/kretard
-Now with weighted prompts support from https://github.com/lstein/stable-diffusion#weighted-prompts
-Added animation from Deforum's GitHub
-Added LDM modules from Doggettx
-Added Variations by Justinpinkey
+
 
 ### Any questions? Come hop on by to them Discord server!
 
