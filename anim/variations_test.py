@@ -579,7 +579,7 @@ def transform_image_3d(prev_img_cv2, adabins_helper, midas_model, midas_transfor
         #if device == torch.device("cuda"):
         sample = sample.to(memory_format=torch.channels_last)
         sample = sample.half()
-        
+
         midas_depth = midas_model.forward(sample)
         midas_depth = torch.nn.functional.interpolate(
             midas_depth.unsqueeze(1),
@@ -978,7 +978,7 @@ config_var = OmegaConf.load(config_var)
 device='cpu'
 model_var = load_var_model_from_config(config_var, ckpt_var, device)
 device='cuda'
-def variations(input_im, outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_W, v_H, v_ddim_eta):
+def variations(input_im, outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_W, v_H, v_ddim_eta, v_GFPGAN, v_bg_upsampling, v_upscale):
     #im_path="data/example_conditioning/superresolution/sample_0.jpg",
     ckpt_var="/gdrive/MyDrive/sd-clip-vit-l14-img-embed_ema_only.ckpt"
     config_var="stable-diffusion-gradio-anim-opt/configs/stable-diffusion/sd-image-condition-finetune.yaml"
@@ -1018,9 +1018,14 @@ def variations(input_im, outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_
     x_samples_ddim = sample_model(input_im, model_var, sampler, precision, h, w, ddim_steps, n_samples, scale, ddim_eta)
     for x_sample in x_samples_ddim:
         x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
-        Image.fromarray(x_sample.astype(np.uint8)).save(os.path.join(sample_path, f"{base_count:05}.png"))
+        img = Image.fromarray(x_sample.astype(np.uint8))
+        if v_GFPGAN:
+          img = FACE_RESTORATION(img, v_bg_upsampling, v_upscale).astype(np.uint8)
+          img = Image.fromarray(img)
+        else:
+          img = img
+        img.save(os.path.join(sample_path, f"{base_count:05}.png"))
         paths.append(f"{sample_path}/{base_count:05}.png")
-
         base_count += 1
     del x_samples_ddim
     del sampler
@@ -1183,7 +1188,7 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
         os.makedirs(args.outdir, exist_ok=True)
         print(f"Saving animation frames to {args.outdir}")
 
-        # save settings for the batch
+        #save settings for the batch
         #settings_filename = os.path.join(args.outdir, f"{args.timestring}_settings.txt")
         #with open(settings_filename, "w+", encoding="utf-8") as f:
         #    s = {**dict(args.__dict__)}
@@ -1592,40 +1597,40 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
     if args.animation_mode == '2D' or args.animation_mode == '3D':
         render_animation(args)
         makevideo(args)
-        mem = torch.cuda.memory_allocated()/1e6
-        model.to("cpu")
+        #mem = torch.cuda.memory_allocated()/1e6
+        #model.to("cpu")
 
-        while(torch.cuda.memory_allocated()/1e6 >= mem):
-            time.sleep(1)
+        #while(torch.cuda.memory_allocated()/1e6 >= mem):
+        #    time.sleep(1)
         torch_gc()
         return args.mp4_path
     elif args.animation_mode == 'Video Input':
         render_input_video(args)
         makevideo(args)
-        mem = torch.cuda.memory_allocated()/1e6
-        model.to("cpu")
+        #mem = torch.cuda.memory_allocated()/1e6
+        #model.to("cpu")
 
-        while(torch.cuda.memory_allocated()/1e6 >= mem):
-            time.sleep(1)
+        #while(torch.cuda.memory_allocated()/1e6 >= mem):
+        #    time.sleep(1)
         torch_gc()
         return args.mp4_path
     elif args.animation_mode == 'Interpolation':
         render_interpolation(args)
         makevideo(args)
-        mem = torch.cuda.memory_allocated()/1e6
-        model.to("cpu")
+        #mem = torch.cuda.memory_allocated()/1e6
+        #model.to("cpu")
 
-        while(torch.cuda.memory_allocated()/1e6 >= mem):
-            time.sleep(1)
+        #while(torch.cuda.memory_allocated()/1e6 >= mem):
+        #    time.sleep(1)
         torch_gc()
         return args.mp4_path
     else:
         render_image_batch(args)
         mem = torch.cuda.memory_allocated()/1e6
-        model.to("cpu")
+        #model.to("cpu")
 
-        while(torch.cuda.memory_allocated()/1e6 >= mem):
-            time.sleep(1)
+        #while(torch.cuda.memory_allocated()/1e6 >= mem):
+        #    time.sleep(1)
         torch_gc()
         return args.outputs
 def refresh(choice):
@@ -1639,8 +1644,8 @@ inPaint=None
 demo = gr.Blocks()
 soup_help1 = """
   ##                     Adjective Types\n
-  * _adj-architecture_ - A list of architectural adjectives and styles\n
-  * _adj-beauty_ - A list of beauty adjectives for people (maybe things?)\m
+  * _adj-architecture_ - A list of architectural adjectives and styles
+  * _adj-beauty_ - A list of beauty adjectives for people (maybe things?)
   * _adj-general_ - A list of general adjectives for people/things.
   * _adj-horror_ - A list of horror adjectives
   ##                        Art Types
@@ -1648,11 +1653,11 @@ soup_help1 = """
   * _color_ - A comprehensive list of colors
   * _portrait-type_ - A list of common portrait types/poses
   * _style_ - A list of art styles and mediums
-  Computer Graphics Types
+  ##              Computer Graphics Types
   * _3d-terms_ - A list of 3D graphics terminology
   * _color-palette_ - A list of computer and video game console color palettes
   * _hd_ - A list of high definition resolution terms
-  ##Miscellaneous Types
+  ##            Miscellaneous Types
   * _details_ - A list of detail descriptors
   * _site_ - A list of websites to query
   * _gen-modififer_ - A list of general modifiers adopted from Weird Wonderful AI Art
@@ -1661,9 +1666,9 @@ soup_help1 = """
   * _pop-culture_ - A list of popular culture movies, shows, etc
   * _pop-location_ - A list of popular tourist locations
   * _fantasy-setting_ - A list of fantasy location settings
-  * _fantasy-creature_ - A list of fantasy creatures
-  """
-soup_help2 = """
+  * _fantasy-creature_ - A list of fantasy creatures"""
+
+soup_help2 ="""
   ##                Noun Types
   * _noun-beauty_ - A list of beauty related nouns
   * _noun-emote_ - A list of emotions and expressions
@@ -1794,7 +1799,8 @@ with demo:
 
                     b_sampler = gr.Radio(label='Sampler',
                                         choices=['klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim'],
-                                        value='klms')#sampler
+                                        value='klms',
+                                        interactive=True)#sampler
                     b_animation_prompts = gr.Textbox(label='Prompts',
                                                     placeholder='a beautiful forest by Asher Brown Durand, trending on Artstation\na beautiful city by Asher Brown Durand, trending on Artstation',
                                                     lines=5)#animation_prompts
@@ -1837,9 +1843,11 @@ with demo:
                     i_strength = gr.Slider(minimum=0, maximum=1, step=0.01, label='Init Image Strength', value=0.00, interactive=True)#strength
                     i_batch_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
                     i_outdir = gr.Textbox(label='Output Dir',  placeholder='/content/', lines=1, value='/gdrive/MyDrive/sd_anims/', interactive=True)#outdir
-
-
-
+                    use_mask = gr.Checkbox(label='Use Mask Path', value=True, visible=False) #@param {type:"boolean"}
+                    mask_file = gr.Textbox(label='Mask File', placeholder='https://www.filterforge.com/wiki/images/archive/b/b7/20080927223728%21Polygonal_gradient_thumb.jpg', interactive=True) #@param {type:"string"}
+                    with gr.Row():
+                        i_use_init = gr.Checkbox(label='use_init', value=True, visible=False)
+                        i_init_image = gr.Textbox(label='Init Image link',  placeholder='https://cdn.pixabay.com/photo/2022/07/30/13/10/green-longhorn-beetle-7353749_1280.jpg', lines=1)#init_image
                 with gr.Column():
                     inPainted = gr.Gallery()
                     i_sampler = gr.Radio(label='Sampler',
@@ -1854,8 +1862,6 @@ with demo:
                         i_H = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)#height
                     i_steps = gr.Slider(minimum=1, maximum=300, step=1, label='Steps', value=100, interactive=True)#steps
                     i_scale = gr.Slider(minimum=1, maximum=25, step=1, label='Scale', value=11, interactive=True)#scale
-                    use_mask = gr.Checkbox(label='Use Mask Path', value=True, visible=False) #@param {type:"boolean"}
-                    mask_file = gr.Textbox(label='Mask File', placeholder='https://www.filterforge.com/wiki/images/archive/b/b7/20080927223728%21Polygonal_gradient_thumb.jpg', interactive=True) #@param {type:"string"}
                     invert_mask = gr.Checkbox(label='Invert Mask', value=True, interactive=True) #@param {type:"boolean"}
                     # Adjust mask image, 1.0 is no adjustment. Should be positive numbers.
                     with gr.Row():
@@ -1868,8 +1874,6 @@ with demo:
                                                       value='None',
                                                       visible=False)#animation_mode
                     i_max_frames = gr.Slider(minimum=1, maximum=1, step=1, label='Steps', value=1, visible=False)#inpaint_frames=0
-                    i_use_init = gr.Checkbox(label='use_init', value=True, visible=False)
-                    i_init_image = gr.Textbox(label='Init Image link',  placeholder='https://cdn.pixabay.com/photo/2022/07/30/13/10/green-longhorn-beetle-7353749_1280.jpg', lines=1)#init_image
         with gr.TabItem('Variations'):
                 with gr.Column():
                     with gr.Row():
@@ -1877,10 +1881,13 @@ with demo:
                             input_var = gr.Image()
                             var_samples = gr.Slider(minimum=1, maximum=8, step=1, label='Samples (V100 = 3 x 512x512)', value=1)#n_samples
                             var_plms = gr.Checkbox(label='PLMS (Off is DDIM)', value=True, visible=True, interactive=True)
+                            with gr.Row():
+                                v_GFPGAN = gr.Checkbox(label='GFPGAN, Upscaler', value=False)
+                                v_bg_upsampling = gr.Checkbox(label='BG Enhancement', value=False)
+                                v_upscale = gr.Slider(minimum=1, maximum=8, step=1, label='Upscaler, 1 to turn off', value=1, interactive=True)
                         output_var = gr.Gallery()
                     var_outdir = gr.Textbox(label='Output Folder',  value='/gdrive/MyDrive/variations', lines=1)
                     v_ddim_eta = gr.Slider(minimum=0, maximum=1, step=0.01, label='DDIM ETA', value=1.0, interactive=True)#scale
-
                     with gr.Row():
 
                         v_cfg_scale = gr.Slider(minimum=0, maximum=25, step=0.1, label='Cfg Scale', value=3.0, interactive=True)#scale
@@ -1893,14 +1900,14 @@ with demo:
                     var_btn = gr.Button('Variations')
         with gr.TabItem('NoodleSoup'):
             with gr.Column():
-                input_prompt = gr.Textbox(label='IN',  placeholder='Portrait of a _adj-beauty_ _noun-emote_ _nationality_ woman from _pop-culture_ in _pop-location_ with pearlescent skin and white hair by _artist_, _site_', lines=3)
-                output_prompt = gr.Textbox(label='OUT',  placeholder='Your Soup', lines=3)
-
-
+                input_prompt = gr.Textbox(label='IN',  placeholder='Portrait of a _adj-beauty_ _noun-emote_ _nationality_ woman from _pop-culture_ in _pop-location_ with pearlescent skin and white hair by _artist_, _site_', lines=2)
+                output_prompt = gr.Textbox(label='OUT',  placeholder='Your Soup', lines=2)
                 soup_btn = gr.Button('Cook')
-
-                gr.Markdown(value=soup_help1)
-                gr.Markdown(value=soup_help2)
+                with gr.Row():
+                  with gr.Column():
+                      gr.Markdown(value=soup_help1)
+                  with gr.Column():
+                      gr.Markdown(value=soup_help2)
 
     var_inputs = [input_var, var_outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_W, v_H, v_ddim_eta]
     var_outputs = [output_var]
@@ -1995,11 +2002,11 @@ class ServerLauncher(threading.Thread):
             'server_port': 7860,
             'show_error': True,
             'server_name': '0.0.0.0',
-            'share': True
+            #'share': True
             #'share': opt.share
         }
         #if not opt.share:
-        demo.queue(concurrency_count=1)
+        #demo.queue(concurrency_count=1)
         #if opt.share and opt.share_password:
         #    gradio_params['auth'] = ('webui', opt.share_password)
         self.demo.launch(**gradio_params)

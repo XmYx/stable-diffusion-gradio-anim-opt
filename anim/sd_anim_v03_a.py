@@ -36,12 +36,15 @@ opt = parser.parse_args()
 sys.path.extend([
     '/content/src/taming-transformers',
     '/content/src/clip',
-    '/content/stable-diffusion/',
+    '/content/stable-diffusion-gradio-anim-opt/',
     '/content/k-diffusion',
     '/content/pytorch3d-lite',
     '/content/AdaBins',
     '/content/MiDaS',
+    '/content/soup'
 ])
+
+
 
 import py3d_tools as p3d
 from helpers import save_samples, sampler_fn
@@ -53,11 +56,75 @@ from ldm.models.diffusion.ddim import DDIMSampler
 from ldm.models.diffusion.plms import PLMSSampler
 from midas.dpt_depth import DPTDepthModel
 from midas.transforms import Resize, NormalizeImage, PrepareForNet
+
+import nsp_pantry
+from nsp_pantry import nspterminology, nsp_parse
 models_path = "/gdrive/MyDrive/" #@param {type:"string"}
 output_path = "/content/output" #@param {type:"string"}
 
 mount_google_drive = False #@param {type:"boolean"}Will Remove
 force_remount = False #Will Remove
+
+class log:
+    f = lambda color: lambda string: print(color + string + "\33[0m")
+    black = f("\33[30m")
+    red = f("\33[31m")
+    green = f("\33[32m")
+    yellow = f("\33[33m")
+    blue = f("\33[34m")
+    megenta = f("\33[35m")
+    cyan = f("\33[36m")
+    white = f("\33[37m")
+
+
+
+terminology_database = nspterminology
+
+if terminology_database:
+	log.green("Loaded terminology database from the pantry.")
+	print("\x1B[3mMmm. Noodle Soup.\x1B[0m")
+else:
+	log.red("Unable to load terminology database")
+
+
+def process_noodle_soup(text_prompts):
+
+  new_prom = list(text_prompts.split("\n"))
+  nan = "nan"
+  prompt_series = pd.Series([np.nan for a in range(len(new_prom))])
+  for i, nan in prompt_series.items():
+    print(i)
+    print(nan)
+    prompt_series[i] = new_prom[i]
+  text_prompts = new_prom
+
+  terms = []
+  for term in terminology_database:
+    if term not in terms:
+      terms.append(term)
+
+  processed_prompt_list = {}
+  processed_prompts = []
+
+  print("")
+  print("text_prompts = {")
+  #for pstep, pvalue in text_prompts.items():
+    #print("    "+str(pstep)+": [")
+  for prompt in text_prompts:
+    new_prompt = prompt
+    for term in terms:
+      tk = '_'+term+'_'
+      tc = prompt.count(tk)
+      for i in range(tc):
+        new_prompt = new_prompt.replace(tk, random.choice(terminology_database[term]), 1)
+    processed_prompts.append(new_prompt)
+    #processed_prompt_list[pstep] = processed_prompts
+    for npr in processed_prompts:
+      log.yellow("        \""+npr+"\",")
+    print("        ],")
+    processed_prompts = []
+  print("}")
+  return npr
 
 class MemUsageMonitor(threading.Thread):
     stop_flag = False
@@ -129,28 +196,25 @@ def crash(e, s):
     t = threading.Timer(0.25, os._exit, args=[0])
     t.start()
 
-def load_model_from_config(config, ckpt, verbose=False, device='cuda', half_precision=True):
-    map_location = "cpu" #@param ["cpu", "cuda"]
+def load_model_from_config(config, ckpt, verbose=False):
     print(f"Loading model from {ckpt}")
-    pl_sd = torch.load(ckpt, map_location=map_location)
+    pl_sd = torch.load(ckpt, map_location="cpu")
     if "global_step" in pl_sd:
         print(f"Global Step: {pl_sd['global_step']}")
     sd = pl_sd["state_dict"]
     model = instantiate_from_config(config.model)
     m, u = model.load_state_dict(sd, strict=False)
     if len(m) > 0 and verbose:
-        print("missing args:")
+        print("missing keys:")
         print(m)
     if len(u) > 0 and verbose:
         print("unexpected keys:")
         print(u)
-
-    if half_precision:
-        model = model.half().to(device)
-    else:
-        model = model.to(device)
+    model = model.half()
+    model.cuda()
     model.eval()
     return model
+
 
 model_config = "v1-inference.yaml" #@param ["custom","v1-inference.yaml"]
 model_checkpoint =  "model.ckpt" #@param ["custom","sd-v1-4-full-ema.ckpt","sd-v1-4.ckpt","sd-v1-3-full-ema.ckpt","sd-v1-3.ckpt","sd-v1-2-full-ema.ckpt","sd-v1-2.ckpt","sd-v1-1-full-ema.ckpt","sd-v1-1.ckpt"]
@@ -175,7 +239,7 @@ ckpt_config_path = custom_config_path if model_config == "custom" else os.path.j
 if os.path.exists(ckpt_config_path):
     print(f"{ckpt_config_path} exists")
 else:
-    ckpt_config_path = "/content/stable-diffusion/configs/stable-diffusion/v1-inference.yaml"
+    ckpt_config_path = "/content/stable-diffusion-gradio-anim-opt/configs/stable-diffusion/v1-inference.yaml"
 print(f"Using config: {ckpt_config_path}")
 
 # checkpoint path or download
@@ -205,7 +269,7 @@ if ckpt_valid:
 
 if load_on_run_all and ckpt_valid:
     local_config = OmegaConf.load(f"{ckpt_config_path}")
-    model = load_model_from_config(local_config, f"{ckpt_path}",half_precision=half_precision)
+    model = load_model_from_config(local_config, f"{ckpt_path}")
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     model = model.to("cpu")
 
@@ -512,9 +576,10 @@ def transform_image_3d(prev_img_cv2, adabins_helper, midas_model, midas_transfor
         print(f"Estimating depth of {w}x{h} image with MiDaS...")
         sample = torch.from_numpy(img_midas_input).float().to(device).unsqueeze(0)
         #device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        if device == torch.device("cuda"):
-            sample = sample.to(memory_format=torch.channels_last)
-            sample = sample.half()
+        #if device == torch.device("cuda"):
+        sample = sample.to(memory_format=torch.channels_last)
+        sample = sample.half()
+
         midas_depth = midas_model.forward(sample)
         midas_depth = torch.nn.functional.interpolate(
             midas_depth.unsqueeze(1),
@@ -704,6 +769,8 @@ def generate(args, return_latent=False, return_sample=False, return_c=False):
 
 def generate(args, return_latent=False, return_sample=False, return_c=False):
 
+
+
     seed_everything(args.seed)
     os.makedirs(args.outdir, exist_ok=True)
 
@@ -833,13 +900,26 @@ def generate(args, return_latent=False, return_sample=False, return_c=False):
                     for x_sample in x_samples:
                         x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
                         image = Image.fromarray(x_sample.astype(np.uint8))
+                        if args.GFPGAN:
+                            image = FACE_RESTORATION(image, args.bg_upsampling, args.upscale).astype(np.uint8)
+                            image = Image.fromarray(image)
+                        else:
+                            image = image
+
+
                         results.append(image)
     return results
 
+
+
+
+
+
 def sample_model(input_im, model_var, sampler, precision, h, w, ddim_steps, n_samples, scale, ddim_eta):
+    model_var.to("cuda")
     precision_scope = autocast if precision=="autocast" else nullcontext
     with torch.no_grad():
-        with precision_scope(nullcontext):
+        with precision_scope('cuda'):
             with model_var.ema_scope():
                 c = model_var.get_learned_conditioning(input_im).tile(n_samples,1,1)
 
@@ -860,13 +940,21 @@ def sample_model(input_im, model_var, sampler, precision, h, w, ddim_steps, n_sa
                                                  x_T=None)
 
                 x_samples_ddim = model_var.decode_first_stage(samples_ddim)
-                return torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0).cpu()
+                img = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0).cpu()
+                del x_samples_ddim
+                del samples_ddim
+                del c
+                mem = torch.cuda.memory_allocated()/1e6
+                model_var.to('cpu')
+                while(torch.cuda.memory_allocated()/1e6 >= mem):
+                    time.sleep(1)
+                return img
 
 def load_var_model_from_config(config_var, ckpt_var, device, verbose=False, half_precision=True):
-    model.to("cpu")
+    #model.to("cpu")
     torch_gc()
     print(f"Loading model from {ckpt_var}")
-    pl_sd = torch.load(ckpt_var, map_location="cpu")
+    pl_sd = torch.load(ckpt_var, map_location=device)
     if "global_step" in pl_sd:
         print(f"Global Step: {pl_sd['global_step']}")
     sd = pl_sd["state_dict"]
@@ -878,26 +966,32 @@ def load_var_model_from_config(config_var, ckpt_var, device, verbose=False, half
     if len(u) > 0 and verbose:
         print("unexpected keys:")
         print(u)
-    model.to("cpu")
+    #model.to("cpu")
     torch_gc()
-    model_var.to(device)
+    model_var.half().to(device)
     model_var.eval()
     return model_var
+ckpt_var="/gdrive/MyDrive/sd-clip-vit-l14-img-embed_ema_only.ckpt"
+config_var="stable-diffusion-gradio-anim-opt/configs/stable-diffusion/sd-image-condition-finetune.yaml"
+config_var = OmegaConf.load(config_var)
 
-def variations(input_im, outdir, var_samples, var_plms):
+device='cpu'
+model_var = load_var_model_from_config(config_var, ckpt_var, device)
+device='cuda'
+def variations(input_im, outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_W, v_H, v_ddim_eta, v_GFPGAN, v_bg_upsampling, v_upscale):
     #im_path="data/example_conditioning/superresolution/sample_0.jpg",
     ckpt_var="/gdrive/MyDrive/sd-clip-vit-l14-img-embed_ema_only.ckpt"
-    config_var="sd_vars/stable-diffusion/configs/stable-diffusion/sd-image-condition-finetune.yaml"
+    config_var="stable-diffusion-gradio-anim-opt/configs/stable-diffusion/sd-image-condition-finetune.yaml"
     outpath=outdir
-    scale=3.0
-    h=512
-    w=512
+    scale=v_cfg_scale
+    h=v_H
+    w=v_W
     n_samples=var_samples
-    precision="fp16"
+    precision="autocast"
     if var_plms == True:
         plms=True
-    ddim_steps=50
-    ddim_eta=1.0
+    ddim_steps=v_steps
+    ddim_eta=v_ddim_eta
     device_idx=0
 
 
@@ -906,8 +1000,8 @@ def variations(input_im, outdir, var_samples, var_plms):
     input_im = transforms.ToTensor()(input_im).unsqueeze(0).to(device)
     input_im = input_im*2-1
     #input_im = load_im(im_path).to(device)
-    config_var = OmegaConf.load(config_var)
-    model_var = load_var_model_from_config(config_var, ckpt_var, device)
+
+
 
     if plms:
         sampler = PLMSSampler(model_var)
@@ -924,10 +1018,18 @@ def variations(input_im, outdir, var_samples, var_plms):
     x_samples_ddim = sample_model(input_im, model_var, sampler, precision, h, w, ddim_steps, n_samples, scale, ddim_eta)
     for x_sample in x_samples_ddim:
         x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
-        Image.fromarray(x_sample.astype(np.uint8)).save(os.path.join(sample_path, f"{base_count:05}.png"))
+        img = Image.fromarray(x_sample.astype(np.uint8))
+        if v_GFPGAN:
+          img = FACE_RESTORATION(img, v_bg_upsampling, v_upscale).astype(np.uint8)
+          img = Image.fromarray(img)
+        else:
+          img = img
+        img.save(os.path.join(sample_path, f"{base_count:05}.png"))
         paths.append(f"{sample_path}/{base_count:05}.png")
-
         base_count += 1
+    del x_samples_ddim
+    del sampler
+    torch_gc()
     return paths
 
 def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts: str, batch_name: str, outdir: str, max_frames: int, GFPGAN: bool, bg_upsampling: bool, upscale: int, W: int, H: int, steps: int, scale: int, angle: str, zoom: str, translation_x: str, translation_y: str, translation_z: str, rotation_3d_x: str, rotation_3d_y: str, rotation_3d_z: str, use_depth_warping: bool, midas_weight: float, near_plane: int, far_plane: int, fov: int, padding_mode: str, sampling_mode: str, seed_behavior: str, seed: str, interp_spline: str, noise_schedule: str, strength_schedule: str, contrast_schedule: str, sampler: str, extract_nth_frame: int, interpolate_x_frames: int, border: str, color_coherence: str, previous_frame_noise: float, previous_frame_strength: float, video_init_path: str, save_grid: bool, save_settings: bool, save_samples: bool, display_samples: bool, n_batch: int, n_samples: int, ddim_eta: float, use_init: bool, init_image: str, strength: float, timestring: str, resume_from_timestring: bool, resume_timestring: str, make_grid: bool, init_img_array, use_mask, mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust):
@@ -936,7 +1038,10 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
 
 
 
-    model.to("cuda")
+    model.to('cuda')
+
+
+
     torch_gc()
     images = []
     results = []
@@ -962,14 +1067,12 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
             PrepareForNet()
         ])
 
-        print(f'model: {midas_transform}')
-        print(f'model: {midas_model}')
-
         midas_model.eval()
         if optimize:
             if device == torch.device("cuda"):
                 midas_model = midas_model.to(memory_format=torch.channels_last)
                 midas_model = midas_model.half()
+        midas_model = midas_model.half()
         midas_model.to(device)
         args.mtransform = midas_transform
 
@@ -1232,6 +1335,7 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
         return frames
 
     def render_image_batch(args):
+        model.to('cuda')
         #args.prompts = prompts
 
         args.prompts = list(args.animation_prompts.split("\n"))
@@ -1290,7 +1394,7 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
 
                 for image in init_array: # iterates the init images
                     args.init_image = image
-
+                    print(f'USING SEED FOR BATCH:{args.seed}')
                     results = generate(args)
                     for image in results:
                         #all_images.append(results[image])
@@ -1307,7 +1411,8 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
                         #if args.display_samples:
                         #    display.display(image)
                         index += 1
-                    args.seed = next_seed(args)
+                    if args.seed_behavior != 'fixed':
+                        args.seed = next_seed(args)
 
             #print(len(all_images))
         if args.make_grid:
@@ -1460,7 +1565,6 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
     arger(animation_prompts, prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode, init_img_array, use_mask, mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust)
     args = SimpleNamespace(**arger(animation_prompts, prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode, init_img_array, use_mask, mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust))
     args.outputs = []
-    print('InPaint arg: {init_img_array}')
     if args.animation_mode == 'None':
         args.max_frames = 1
 
@@ -1493,28 +1597,42 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
     if args.animation_mode == '2D' or args.animation_mode == '3D':
         render_animation(args)
         makevideo(args)
+        mem = torch.cuda.memory_allocated()/1e6
         model.to("cpu")
+
+        while(torch.cuda.memory_allocated()/1e6 >= mem):
+            time.sleep(1)
         torch_gc()
         return args.mp4_path
     elif args.animation_mode == 'Video Input':
         render_input_video(args)
         makevideo(args)
+        mem = torch.cuda.memory_allocated()/1e6
         model.to("cpu")
+
+        while(torch.cuda.memory_allocated()/1e6 >= mem):
+            time.sleep(1)
         torch_gc()
         return args.mp4_path
     elif args.animation_mode == 'Interpolation':
         render_interpolation(args)
         makevideo(args)
+        mem = torch.cuda.memory_allocated()/1e6
         model.to("cpu")
+
+        while(torch.cuda.memory_allocated()/1e6 >= mem):
+            time.sleep(1)
         torch_gc()
         return args.mp4_path
     else:
         render_image_batch(args)
+        mem = torch.cuda.memory_allocated()/1e6
         model.to("cpu")
+
+        while(torch.cuda.memory_allocated()/1e6 >= mem):
+            time.sleep(1)
         torch_gc()
         return args.outputs
-
-
 def refresh(choice):
     print(choice)
     #choice = None
@@ -1524,6 +1642,59 @@ torch_gc()
 inPaint=None
 
 demo = gr.Blocks()
+soup_help1 = """
+  ##                     Adjective Types\n
+  * _adj-architecture_ - A list of architectural adjectives and styles
+  * _adj-beauty_ - A list of beauty adjectives for people (maybe things?)
+  * _adj-general_ - A list of general adjectives for people/things.
+  * _adj-horror_ - A list of horror adjectives
+  ##                        Art Types
+  * _artist_ - A comprehensive list of artists by MisterRuffian (Discord Misterruffian#2891)
+  * _color_ - A comprehensive list of colors
+  * _portrait-type_ - A list of common portrait types/poses
+  * _style_ - A list of art styles and mediums
+  ##              Computer Graphics Types
+  * _3d-terms_ - A list of 3D graphics terminology
+  * _color-palette_ - A list of computer and video game console color palettes
+  * _hd_ - A list of high definition resolution terms
+  ##            Miscellaneous Types
+  * _details_ - A list of detail descriptors
+  * _site_ - A list of websites to query
+  * _gen-modififer_ - A list of general modifiers adopted from Weird Wonderful AI Art
+  * _neg-weight_ - A lsit of negative weight ideas
+  * _punk_ - A list of punk modifier (eg. cyberpunk)
+  * _pop-culture_ - A list of popular culture movies, shows, etc
+  * _pop-location_ - A list of popular tourist locations
+  * _fantasy-setting_ - A list of fantasy location settings
+  * _fantasy-creature_ - A list of fantasy creatures"""
+
+soup_help2 ="""
+  ##                Noun Types
+  * _noun-beauty_ - A list of beauty related nouns
+  * _noun-emote_ - A list of emotions and expressions
+  * _noun-fantasy_ - A list of fantasy nouns
+  * _noun-general_ - A list of general nouns
+  * _noun-horror_ - A list of horror nouns
+  ##People Types
+  * _bodyshape_ - A list of body shapes
+  * _celeb_ - A list of celebrities
+  * _eyecolor_ - A list of eye colors
+  * _hair_ - A list of hair types
+  * _nationality_ - A list of nationalities
+  * _occputation_ A list of occupation types
+  * _skin-color_ - A list of skin tones
+  * _identity-young_ A list of young identifiers
+  * _identity-adult_ A list of adult identifiers
+  * _identity_ A list of general identifiers
+  ##Photography / Image / Film Types
+  * _aspect-ratio_ - A list of common aspect ratios
+  * _cameras_ - A list of camera models (including manufactuerer)
+  * _camera-manu_ - A list of camera manufacturers
+  * _f-stop_ - A list of camera aperture f-stop
+  * _focal-length_ - A list of focal length ranges
+  * _photo-term_ - A list of photography terms relating to photos
+  """
+
 
 with demo:
     with gr.Tabs():
@@ -1577,8 +1748,8 @@ with demo:
                           GFPGAN = gr.Checkbox(label='GFPGAN, Upscaler', value=False)
                           bg_upsampling = gr.Checkbox(label='BG Enhancement', value=False)
                           upscale = gr.Slider(minimum=1, maximum=8, step=1, label='Upscaler, 1 to turn off', value=1, interactive=True)
-                      W = gr.Slider(minimum=256, maximum=1024, step=64, label='Width', value=512, interactive=True)#width
-                      H = gr.Slider(minimum=256, maximum=1024, step=64, label='Height', value=512, interactive=True)#height
+                      W = gr.Slider(minimum=256, maximum=8192, step=64, label='Width', value=512, interactive=True)#width
+                      H = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)#height
                       steps = gr.Slider(minimum=1, maximum=300, step=1, label='Steps', value=100, interactive=True)#steps
                       scale = gr.Slider(minimum=1, maximum=25, step=1, label='Scale', value=11, interactive=True)#scale
                       video_init_path = gr.Textbox(label='Video init path',  placeholder='/content/video_in.mp4', lines=1)#video_init_path
@@ -1628,7 +1799,8 @@ with demo:
 
                     b_sampler = gr.Radio(label='Sampler',
                                         choices=['klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim'],
-                                        value='klms')#sampler
+                                        value='klms',
+                                        interactive=True)#sampler
                     b_animation_prompts = gr.Textbox(label='Prompts',
                                                     placeholder='a beautiful forest by Asher Brown Durand, trending on Artstation\na beautiful city by Asher Brown Durand, trending on Artstation',
                                                     lines=5)#animation_prompts
@@ -1650,8 +1822,8 @@ with demo:
                     b_GFPGAN = gr.Checkbox(label='GFPGAN, Face Resto, Upscale', value=False)
                     b_bg_upsampling = gr.Checkbox(label='BG Enhancement', value=False)
                     b_upscale = gr.Slider(minimum=1, maximum=8, step=1, label='Upscaler, 1 to turn off', value=1, interactive=True)
-                    b_W = gr.Slider(minimum=256, maximum=1024, step=64, label='Width', value=512, interactive=True)#width
-                    b_H = gr.Slider(minimum=256, maximum=1024, step=64, label='Height', value=512, interactive=True)#height
+                    b_W = gr.Slider(minimum=256, maximum=8192, step=64, label='Width', value=512, interactive=True)#width
+                    b_H = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)#height
                     b_steps = gr.Slider(minimum=1, maximum=300, step=1, label='Steps', value=100, interactive=True)#steps
                     b_scale = gr.Slider(minimum=1, maximum=25, step=1, label='Scale', value=11, interactive=True)#scale
                     b_batch_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
@@ -1671,9 +1843,11 @@ with demo:
                     i_strength = gr.Slider(minimum=0, maximum=1, step=0.01, label='Init Image Strength', value=0.00, interactive=True)#strength
                     i_batch_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
                     i_outdir = gr.Textbox(label='Output Dir',  placeholder='/content/', lines=1, value='/gdrive/MyDrive/sd_anims/', interactive=True)#outdir
-
-
-
+                    use_mask = gr.Checkbox(label='Use Mask Path', value=True, visible=False) #@param {type:"boolean"}
+                    mask_file = gr.Textbox(label='Mask File', placeholder='https://www.filterforge.com/wiki/images/archive/b/b7/20080927223728%21Polygonal_gradient_thumb.jpg', interactive=True) #@param {type:"string"}
+                    with gr.Row():
+                        i_use_init = gr.Checkbox(label='use_init', value=True, visible=False)
+                        i_init_image = gr.Textbox(label='Init Image link',  placeholder='https://cdn.pixabay.com/photo/2022/07/30/13/10/green-longhorn-beetle-7353749_1280.jpg', lines=1)#init_image
                 with gr.Column():
                     inPainted = gr.Gallery()
                     i_sampler = gr.Radio(label='Sampler',
@@ -1684,12 +1858,10 @@ with demo:
                         i_bg_upsampling = gr.Checkbox(label='BG Enhancement', value=False)
                         i_upscale = gr.Slider(minimum=1, maximum=8, step=1, label='Upscaler, 1 to turn off', value=1, interactive=True)
                     with gr.Row():
-                        i_W = gr.Slider(minimum=256, maximum=1024, step=64, label='Width', value=512, interactive=True)#width
-                        i_H = gr.Slider(minimum=256, maximum=1024, step=64, label='Height', value=512, interactive=True)#height
+                        i_W = gr.Slider(minimum=256, maximum=8192, step=64, label='Width', value=512, interactive=True)#width
+                        i_H = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)#height
                     i_steps = gr.Slider(minimum=1, maximum=300, step=1, label='Steps', value=100, interactive=True)#steps
                     i_scale = gr.Slider(minimum=1, maximum=25, step=1, label='Scale', value=11, interactive=True)#scale
-                    use_mask = gr.Checkbox(label='Use Mask Path', value=True, visible=False) #@param {type:"boolean"}
-                    mask_file = gr.Textbox(label='Mask File', placeholder='https://www.filterforge.com/wiki/images/archive/b/b7/20080927223728%21Polygonal_gradient_thumb.jpg', interactive=True) #@param {type:"string"}
                     invert_mask = gr.Checkbox(label='Invert Mask', value=True, interactive=True) #@param {type:"boolean"}
                     # Adjust mask image, 1.0 is no adjustment. Should be positive numbers.
                     with gr.Row():
@@ -1702,21 +1874,46 @@ with demo:
                                                       value='None',
                                                       visible=False)#animation_mode
                     i_max_frames = gr.Slider(minimum=1, maximum=1, step=1, label='Steps', value=1, visible=False)#inpaint_frames=0
-                    i_use_init = gr.Checkbox(label='use_init', value=True, visible=False)
-                    i_init_image = gr.Textbox(label='Init Image link',  placeholder='https://cdn.pixabay.com/photo/2022/07/30/13/10/green-longhorn-beetle-7353749_1280.jpg', lines=1)#init_image
         with gr.TabItem('Variations'):
                 with gr.Column():
                     with gr.Row():
                         with gr.Column():
                             input_var = gr.Image()
-                            var_samples = gr.Slider(minimum=1, maximum=4, step=1, label='Samples (keep on 1)', value=1)#n_samples
+                            var_samples = gr.Slider(minimum=1, maximum=8, step=1, label='Samples (V100 = 3 x 512x512)', value=1)#n_samples
                             var_plms = gr.Checkbox(label='PLMS (Off is DDIM)', value=True, visible=True, interactive=True)
+                            with gr.Row():
+                                v_GFPGAN = gr.Checkbox(label='GFPGAN, Upscaler', value=False)
+                                v_bg_upsampling = gr.Checkbox(label='BG Enhancement', value=False)
+                                v_upscale = gr.Slider(minimum=1, maximum=8, step=1, label='Upscaler, 1 to turn off', value=1, interactive=True)
                         output_var = gr.Gallery()
                     var_outdir = gr.Textbox(label='Output Folder',  value='/gdrive/MyDrive/variations', lines=1)
-                    var_btn = gr.Button('Variations')
+                    v_ddim_eta = gr.Slider(minimum=0, maximum=1, step=0.01, label='DDIM ETA', value=1.0, interactive=True)#scale
+                    with gr.Row():
 
-    var_inputs = [input_var, var_outdir, var_samples, var_plms]
+                        v_cfg_scale = gr.Slider(minimum=0, maximum=25, step=0.1, label='Cfg Scale', value=3.0, interactive=True)#scale
+                        v_steps = gr.Slider(minimum=1, maximum=300, step=1, label='Steps', value=100, interactive=True)#steps
+
+                    with gr.Row():
+                        v_W = gr.Slider(minimum=256, maximum=8192, step=64, label='Width', value=512, interactive=True)#width
+                        v_H = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)#height
+
+                    var_btn = gr.Button('Variations')
+        with gr.TabItem('NoodleSoup'):
+            with gr.Column():
+                input_prompt = gr.Textbox(label='IN',  placeholder='Portrait of a _adj-beauty_ _noun-emote_ _nationality_ woman from _pop-culture_ in _pop-location_ with pearlescent skin and white hair by _artist_, _site_', lines=2)
+                output_prompt = gr.Textbox(label='OUT',  placeholder='Your Soup', lines=2)
+                soup_btn = gr.Button('Cook')
+                with gr.Row():
+                  with gr.Column():
+                      gr.Markdown(value=soup_help1)
+                  with gr.Column():
+                      gr.Markdown(value=soup_help2)
+
+    var_inputs = [input_var, var_outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_W, v_H, v_ddim_eta]
     var_outputs = [output_var]
+
+    soup_inputs = [input_prompt]
+    soup_outputs = [output_prompt]
 
 
 
@@ -1785,6 +1982,7 @@ with demo:
     #print(f'orig: {mp4_paths}')
     #print(f'list: {list(mp4_paths)}')
     var_btn.click(variations, inputs=var_inputs, outputs=var_outputs)
+    soup_btn.click(fn=process_noodle_soup, inputs=soup_inputs, outputs=soup_outputs)
 
     refresh_btn.click(refresh, inputs=inPaint, outputs=inPaint)
     inPaint_btn.click(fn=anim, inputs=mask_inputs, outputs=inPaint_outputs)
@@ -1804,11 +2002,11 @@ class ServerLauncher(threading.Thread):
             'server_port': 7860,
             'show_error': True,
             'server_name': '0.0.0.0',
-            'share': True
+            #'share': True
             #'share': opt.share
         }
         #if not opt.share:
-        demo.queue(concurrency_count=1)
+        #demo.queue(concurrency_count=1)
         #if opt.share and opt.share_password:
         #    gradio_params['auth'] = ('webui', opt.share_password)
         self.demo.launch(**gradio_params)
