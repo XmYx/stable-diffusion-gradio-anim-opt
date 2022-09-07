@@ -27,7 +27,6 @@ from io import BytesIO
 import fire
 import gc
 
-
 parser = argparse.ArgumentParser()
 parser.add_argument("--gpu", type=int, help="choose which GPU to use if you have multiple", default=0)
 parser.add_argument("--cli", type=str, help="don't launch web server, take Python function kwargs from this file.", default=None)
@@ -43,8 +42,6 @@ sys.path.extend([
     '/content/MiDaS',
     '/content/soup'
 ])
-
-
 
 import py3d_tools as p3d
 from helpers import save_samples, sampler_fn
@@ -641,132 +638,6 @@ def transform_image_3d(prev_img_cv2, adabins_helper, midas_model, midas_transfor
     ).cpu().numpy().astype(np.uint8)
     return result
 
-'''
-def generate(args, return_latent=False, return_sample=False, return_c=False):
-
-
-    torch_gc()
-    results = []
-    # start time after garbage collection (or before?)
-    start_time = time.time()
-
-    mem_mon = MemUsageMonitor('MemMon')
-    mem_mon.start()
-
-    seed_everything(args.seed)
-    os.makedirs(args.outdir, exist_ok=True)
-
-    if args.sampler == 'plms':
-        sampler = PLMSSampler(model)
-    else:
-        sampler = DDIMSampler(model)
-
-    model_wrap = CompVisDenoiser(model)
-    batch_size = args.n_samples
-    prompt = args.prompt
-    assert prompt is not None
-    data = [batch_size * [prompt]]
-
-    init_latent = None
-    if args.init_latent is not None:
-        init_latent = args.init_latent
-    elif args.init_sample is not None:
-        init_latent = model.get_first_stage_encoding(model.encode_first_stage(args.init_sample))
-    elif args.init_image != None and args.init_image != '':
-        init_image = load_img(args.init_image, shape=(args.W, args.H)).to(device)
-        init_image = repeat(init_image, '1 ... -> b ...', b=batch_size)
-        init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_image))  # move to latent space
-
-    sampler.make_schedule(ddim_num_steps=args.steps, ddim_eta=args.ddim_eta, verbose=False)
-
-    t_enc = int((1.0-args.strength) * args.steps)
-
-    start_code = None
-    if args.fixed_code and init_latent == None:
-        start_code = torch.randn([args.n_samples, args.C, args.H // args.f, args.W // args.f], device=device)
-
-    callback = make_callback(sampler=args.sampler,
-                            dynamic_threshold=args.dynamic_threshold,
-                            static_threshold=args.static_threshold)
-
-
-    precision_scope = autocast if args.precision == "autocast" else nullcontext
-    with torch.no_grad():
-        with precision_scope("cuda"):
-            with model.ema_scope():
-                for prompts in data:
-                    uc = None
-                    if args.scale != 1.0:
-                        uc = model.get_learned_conditioning(batch_size * [""])
-                    if isinstance(prompts, tuple):
-                        prompts = list(prompts)
-                    c = model.get_learned_conditioning(prompts)
-
-                    if args.init_c != None:
-                        c = args.init_c
-
-                    if args.sampler in ["klms","dpm2","dpm2_ancestral","heun","euler","euler_ancestral"]:
-                        samples = sampler_fn(
-                            c=c,
-                            uc=uc,
-                            args=args,
-                            model_wrap=model_wrap,
-                            init_latent=init_latent,
-                            t_enc=t_enc,
-                            device=device,
-                            cb=callback)
-                    else:
-
-                        if init_latent != None:
-                            z_enc = sampler.stochastic_encode(init_latent, torch.tensor([t_enc]*batch_size).to(device))
-                            samples = sampler.decode(z_enc, c, t_enc, unconditional_guidance_scale=args.scale,
-                                                    unconditional_conditioning=uc,)
-                        else:
-                            if args.sampler == 'plms' or args.sampler == 'ddim':
-                                shape = [args.C, args.H // args.f, args.W // args.f]
-                                samples, _ = sampler.sample(S=args.steps,
-                                                                conditioning=c,
-                                                                batch_size=args.n_samples,
-                                                                shape=shape,
-                                                                verbose=False,
-                                                                unconditional_guidance_scale=args.scale,
-                                                                unconditional_conditioning=uc,
-                                                                eta=args.ddim_eta,
-                                                                x_T=start_code,
-                                                                img_callback=callback)
-
-                    if return_latent:
-                        results.append(samples.clone())
-
-                    x_samples = model.decode_first_stage(samples)
-                    if return_sample:
-                        results.append(x_samples.clone())
-
-                    x_samples = torch.clamp((x_samples + 1.0) / 2.0, min=0.0, max=1.0)
-
-                    if return_c:
-                        results.append(c.clone())
-
-                    for x_sample in x_samples:
-                        x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
-                        image = Image.fromarray(x_sample.astype(np.uint8))
-
-                        if args.GFPGAN:
-                            image = FACE_RESTORATION(image, args.bg_upsampling, args.upscale).astype(np.uint8)
-                            image = Image.fromarray(image)
-                        else:
-                            image = image
-                        results.append(image)
-
-#save(pt, format = 'JPEG', optimize = True)
-#Image.fromarray(FACE_RESTORATION(output_images[i][k], bg_upsampling, upscale, GFPGANth).astype(np.uint8))
-
-    torch_gc()
-    return results
-'''
-
-
-
 def generate(args, return_latent=False, return_sample=False, return_c=False):
 
 
@@ -910,11 +781,6 @@ def generate(args, return_latent=False, return_sample=False, return_c=False):
                         results.append(image)
     return results
 
-
-
-
-
-
 def sample_model(input_im, model_var, sampler, precision, h, w, ddim_steps, n_samples, scale, ddim_eta):
     model_var.to("cuda")
     precision_scope = autocast if precision=="autocast" else nullcontext
@@ -978,6 +844,7 @@ config_var = OmegaConf.load(config_var)
 device='cpu'
 model_var = load_var_model_from_config(config_var, ckpt_var, device)
 device='cuda'
+
 def variations(input_im, outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_W, v_H, v_ddim_eta, v_GFPGAN, v_bg_upsampling, v_upscale):
     #im_path="data/example_conditioning/superresolution/sample_0.jpg",
     ckpt_var="/gdrive/MyDrive/sd-clip-vit-l14-img-embed_ema_only.ckpt"
@@ -1031,6 +898,10 @@ def variations(input_im, outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_
     del sampler
     torch_gc()
     return paths
+
+def batch(b_prompts, b_name, b_outdir, b_max_frames, b_GFPGAN, b_bg_upsampling, b_upscale, b_W, b_H, b_steps, b_scale, b_seed_behavior, b_seed, b_sampler, b_save_grid, b_save_settings, b_save_samples, b_n_batch, n_samples, b_ddim_eta, b_use_init, b_init_image, b_strength, b_make_grid):
+    
+
 
 def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts: str, batch_name: str, outdir: str, max_frames: int, GFPGAN: bool, bg_upsampling: bool, upscale: int, W: int, H: int, steps: int, scale: int, angle: str, zoom: str, translation_x: str, translation_y: str, translation_z: str, rotation_3d_x: str, rotation_3d_y: str, rotation_3d_z: str, use_depth_warping: bool, midas_weight: float, near_plane: int, far_plane: int, fov: int, padding_mode: str, sampling_mode: str, seed_behavior: str, seed: str, interp_spline: str, noise_schedule: str, strength_schedule: str, contrast_schedule: str, sampler: str, extract_nth_frame: int, interpolate_x_frames: int, border: str, color_coherence: str, previous_frame_noise: float, previous_frame_strength: float, video_init_path: str, save_grid: bool, save_settings: bool, save_samples: bool, display_samples: bool, n_batch: int, n_samples: int, ddim_eta: float, use_init: bool, init_image: str, strength: float, timestring: str, resume_from_timestring: bool, resume_timestring: str, make_grid: bool, init_img_array, use_mask, mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust):
 
@@ -1188,7 +1059,7 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
         os.makedirs(args.outdir, exist_ok=True)
         print(f"Saving animation frames to {args.outdir}")
 
-        # save settings for the batch
+        #save settings for the batch
         #settings_filename = os.path.join(args.outdir, f"{args.timestring}_settings.txt")
         #with open(settings_filename, "w+", encoding="utf-8") as f:
         #    s = {**dict(args.__dict__)}
@@ -1597,42 +1468,43 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
     if args.animation_mode == '2D' or args.animation_mode == '3D':
         render_animation(args)
         makevideo(args)
-        mem = torch.cuda.memory_allocated()/1e6
-        model.to("cpu")
+        #mem = torch.cuda.memory_allocated()/1e6
+        #model.to("cpu")
 
-        while(torch.cuda.memory_allocated()/1e6 >= mem):
-            time.sleep(1)
+        #while(torch.cuda.memory_allocated()/1e6 >= mem):
+        #    time.sleep(1)
         torch_gc()
         return args.mp4_path
     elif args.animation_mode == 'Video Input':
         render_input_video(args)
         makevideo(args)
-        mem = torch.cuda.memory_allocated()/1e6
-        model.to("cpu")
+        #mem = torch.cuda.memory_allocated()/1e6
+        #model.to("cpu")
 
-        while(torch.cuda.memory_allocated()/1e6 >= mem):
-            time.sleep(1)
+        #while(torch.cuda.memory_allocated()/1e6 >= mem):
+        #    time.sleep(1)
         torch_gc()
         return args.mp4_path
     elif args.animation_mode == 'Interpolation':
         render_interpolation(args)
         makevideo(args)
-        mem = torch.cuda.memory_allocated()/1e6
-        model.to("cpu")
+        #mem = torch.cuda.memory_allocated()/1e6
+        #model.to("cpu")
 
-        while(torch.cuda.memory_allocated()/1e6 >= mem):
-            time.sleep(1)
+        #while(torch.cuda.memory_allocated()/1e6 >= mem):
+        #    time.sleep(1)
         torch_gc()
         return args.mp4_path
     else:
         render_image_batch(args)
         mem = torch.cuda.memory_allocated()/1e6
-        model.to("cpu")
+        #model.to("cpu")
 
-        while(torch.cuda.memory_allocated()/1e6 >= mem):
-            time.sleep(1)
+        #while(torch.cuda.memory_allocated()/1e6 >= mem):
+        #    time.sleep(1)
         torch_gc()
         return args.outputs
+
 def refresh(choice):
     print(choice)
     #choice = None
@@ -1642,6 +1514,7 @@ torch_gc()
 inPaint=None
 
 demo = gr.Blocks()
+
 soup_help1 = """
   ##                     Adjective Types\n
   * _adj-architecture_ - A list of architectural adjectives and styles
@@ -1694,7 +1567,6 @@ soup_help2 ="""
   * _focal-length_ - A list of focal length ranges
   * _photo-term_ - A list of photography terms relating to photos
   """
-
 
 with demo:
     with gr.Tabs():
@@ -1909,7 +1781,7 @@ with demo:
                   with gr.Column():
                       gr.Markdown(value=soup_help2)
 
-    var_inputs = [input_var, var_outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_W, v_H, v_ddim_eta]
+    var_inputs = [input_var, var_outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_W, v_H, v_ddim_eta, v_GFPGAN, v_bg_upsampling, v_upscale]
     var_outputs = [output_var]
 
     soup_inputs = [input_prompt]
@@ -2050,5 +1922,3 @@ if __name__ == '__main__':
         launch_server()
     #else:
     #    run_headless()
-
-#demo.launch(debug=False, share=True)
