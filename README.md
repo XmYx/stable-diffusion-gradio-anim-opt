@@ -1,5 +1,5 @@
 
-[![HLKY/Deforum Animation](https://colab.research.google.com/assets/colab-badge.svg)](https://github.com/XmYx/waifu-diffusion-gradio-hosted-by-colab-en/blob/main/P_HLKY_Deforum_StableDiffusion_GradIO_Colab.ipynb)
+[![HLKY/Deforum Animation](https://colab.research.google.com/assets/colab-badge.svg)](https://github.com/XmYx/stable-diffusion-gradio-anim-opt/blob/main/P_HLKY_Deforum_StableDiffusion_GradIO_Colab.ipynb)
 
 # Stable Diffusion Colab including HLKY's WebUI, and Deforum's animation WebUI, both running GradIO and ngrok
 
