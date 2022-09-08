@@ -30,6 +30,9 @@ import gc
 parser = argparse.ArgumentParser()
 parser.add_argument("--gpu", type=int, help="choose which GPU to use if you have multiple", default=0)
 parser.add_argument("--cli", type=str, help="don't launch web server, take Python function kwargs from this file.", default=None)
+parser.add_argument("--ckpt", type=str, help="Model Path", default=None)
+parser.add_argument("--no_var", type=str, help="Variations Model Path", default=None)
+parser.add_argument("--var_ckpt", type=str, help="Variations Model Path", default=None)
 opt = parser.parse_args()
 
 sys.path.extend([
@@ -56,7 +59,7 @@ from midas.transforms import Resize, NormalizeImage, PrepareForNet
 
 import nsp_pantry
 from nsp_pantry import nspterminology, nsp_parse
-models_path = "/gdrive/MyDrive/" #@param {type:"string"}
+models_path = opt.ckpt #@param {type:"string"}
 output_path = "/content/output" #@param {type:"string"}
 
 mount_google_drive = False #@param {type:"boolean"}Will Remove
@@ -214,7 +217,7 @@ def load_model_from_config(config, ckpt, verbose=False):
 
 
 model_config = "v1-inference.yaml" #@param ["custom","v1-inference.yaml"]
-model_checkpoint =  "model.ckpt" #@param ["custom","sd-v1-4-full-ema.ckpt","sd-v1-4.ckpt","sd-v1-3-full-ema.ckpt","sd-v1-3.ckpt","sd-v1-2-full-ema.ckpt","sd-v1-2.ckpt","sd-v1-1-full-ema.ckpt","sd-v1-1.ckpt"]
+model_checkpoint =  "sd-v1-4.ckpt" #@param ["custom","sd-v1-4-full-ema.ckpt","sd-v1-4.ckpt","sd-v1-3-full-ema.ckpt","sd-v1-3.ckpt","sd-v1-2-full-ema.ckpt","sd-v1-2.ckpt","sd-v1-1-full-ema.ckpt","sd-v1-1.ckpt"]
 custom_config_path = "" #@param {type:"string"}
 custom_checkpoint_path = "" #@param {type:"string"}
 check_sha256 = False #@param {type:"boolean"}
@@ -269,6 +272,70 @@ if load_on_run_all and ckpt_valid:
     model = load_model_from_config(local_config, f"{ckpt_path}")
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     model = model.to("cpu")
+
+def load_var_model_from_config(config_var, ckpt_var, device, verbose=False, half_precision=True):
+    #model.to("cpu")
+    torch_gc()
+    print(f"Loading model from {ckpt_var}")
+    pl_sd = torch.load(ckpt_var, map_location=device)
+    if "global_step" in pl_sd:
+        print(f"Global Step: {pl_sd['global_step']}")
+    sd = pl_sd["state_dict"]
+    model_var = instantiate_from_config(config_var.model)
+    m, u = model_var.load_state_dict(sd, strict=False)
+    if len(m) > 0 and verbose:
+        print("missing keys:")
+        print(m)
+    if len(u) > 0 and verbose:
+        print("unexpected keys:")
+        print(u)
+    #model.to("cpu")
+    torch_gc()
+    model_var.half().to(device)
+    model_var.eval()
+    return model_var
+
+ckpt_var="/gdrive/MyDrive/sd-clip-vit-l14-img-embed_ema_only.ckpt"
+config_var="stable-diffusion-gradio-anim-opt/configs/stable-diffusion/sd-image-condition-finetune.yaml"
+config_var = OmegaConf.load(config_var)
+
+if not opt.no_var:
+    model_var = load_var_model_from_config(config_var, opt.var_ckpt, 'cpu')
+
+def sample_model(input_im, model_var, sampler, precision, h, w, ddim_steps, n_samples, scale, ddim_eta):
+    model_var.to("cuda")
+    precision_scope = autocast if precision=="autocast" else nullcontext
+    with torch.no_grad():
+        with precision_scope('cuda'):
+            with model_var.ema_scope():
+                c = model_var.get_learned_conditioning(input_im).tile(n_samples,1,1)
+
+                if scale != 1.0:
+                    uc = torch.zeros_like(c)
+                else:
+                    uc = None
+
+                shape = [4, h // 8, w // 8]
+                samples_ddim, _ = sampler.sample(S=ddim_steps,
+                                                 conditioning=c,
+                                                 batch_size=n_samples,
+                                                 shape=shape,
+                                                 verbose=False,
+                                                 unconditional_guidance_scale=scale,
+                                                 unconditional_conditioning=uc,
+                                                 eta=ddim_eta,
+                                                 x_T=None)
+
+                x_samples_ddim = model_var.decode_first_stage(samples_ddim)
+                img = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0).cpu()
+                del x_samples_ddim
+                del samples_ddim
+                del c
+                mem = torch.cuda.memory_allocated()/1e6
+                model_var.to('cpu')
+                while(torch.cuda.memory_allocated()/1e6 >= mem):
+                    time.sleep(1)
+                return img
 
 
 def FACE_RESTORATION(image, bg_upsampling, upscale):
@@ -643,123 +710,134 @@ def transform_image_3d(prev_img_cv2, adabins_helper, midas_model, midas_transfor
     ).cpu().numpy().astype(np.uint8)
     return result
 
-def generate(args, return_latent=False, return_sample=False, return_c=False):
+def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, scale, seed, samplern, n_batch, n_samples, ddim_eta, use_init, init_image, init_sample, strength, use_mask, mask_file, mask_contrast_adjust, mask_brightness_adjust, invert_mask, dynamic_threshold, static_threshold, C, f, init_c, return_latent=False, return_sample=False, return_c=False):
+    print(f'Prompt when Generating: {prompt}')
+    precision = "autocast"
+    seed_everything(seed)
+    os.makedirs(outdir, exist_ok=True)
 
-
-
-    seed_everything(args.seed)
-    os.makedirs(args.outdir, exist_ok=True)
-
-    if args.sampler == 'plms':
+    if samplern == 'plms':
         sampler = PLMSSampler(model)
     else:
         sampler = DDIMSampler(model)
 
     model_wrap = CompVisDenoiser(model)
-    batch_size = args.n_samples
-    prompt = args.prompt
+    batch_size = n_samples
+    #gprompt = prompt
     assert prompt is not None
     data = [batch_size * [prompt]]
 
     init_latent = None
-    if args.init_latent is not None:
-        init_latent = args.init_latent
-    elif args.init_sample is not None:
-        init_latent = model.get_first_stage_encoding(model.encode_first_stage(args.init_sample))
-    elif args.use_init and args.init_image != None and args.init_image != '':
-        init_image = load_img(args.init_image, shape=(args.W, args.H)).to(device)
+    if init_latent is not None:
+        init_latent = init_latent
+    elif init_sample is not None:
+        init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_sample))
+    elif use_init and init_image != None and init_image != '':
+        init_image = load_img(init_image, shape=(W, H)).to(device)
         init_image = repeat(init_image, '1 ... -> b ...', b=batch_size)
         init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_image))  # move to latent space
 
-    if not args.use_init and args.strength > 0:
+    if not use_init and strength > 0:
         print("\nNo init image, but strength > 0. This may give you some strange results.\n")
 
     # Mask functions
     mask = None
-    if args.use_mask:
-        assert args.mask_file is not None, "use_mask==True: An mask image is required for a mask"
-        assert args.use_init, "use_mask==True: use_init is required for a mask"
+    if use_mask:
+        assert mask_file is not None, "use_mask==True: An mask image is required for a mask"
+        assert use_init, "use_mask==True: use_init is required for a mask"
         assert init_latent is not None, "use_mask==True: An latent init image is required for a mask"
 
-        mask = prepare_mask(args.mask_file,
+        mask = prepare_mask(mask_file,
                             init_latent.shape,
-                            args.mask_contrast_adjust,
-                            args.mask_brightness_adjust,
-                            args.invert_mask)
+                            mask_contrast_adjust,
+                            mask_brightness_adjust,
+                            invert_mask)
 
         mask = mask.to(device)
         mask = repeat(mask, '1 ... -> b ...', b=batch_size)
 
-    t_enc = int((1.0-args.strength) * args.steps)
+    t_enc = int((1.0-strength) * steps)
 
     # Noise schedule for the k-diffusion samplers (used for masking)
-    k_sigmas = model_wrap.get_sigmas(args.steps)
+    k_sigmas = model_wrap.get_sigmas(steps)
     k_sigmas = k_sigmas[len(k_sigmas)-t_enc-1:]
 
-    if args.sampler in ['plms','ddim']:
-        sampler.make_schedule(ddim_num_steps=args.steps, ddim_eta=args.ddim_eta, ddim_discretize='fill', verbose=False)
+    if samplern in ['plms','ddim']:
+        sampler.make_schedule(ddim_num_steps=steps, ddim_eta=ddim_eta, ddim_discretize='fill', verbose=False)
 
-    callback = make_callback(sampler_name=args.sampler,
-                            dynamic_threshold=args.dynamic_threshold,
-                            static_threshold=args.static_threshold,
+    callback = make_callback(sampler_name=samplern,
+                            dynamic_threshold=dynamic_threshold,
+                            static_threshold=static_threshold,
                             mask=mask,
                             init_latent=init_latent,
                             sigmas=k_sigmas,
                             sampler=sampler)
 
+
     results = []
-    precision_scope = autocast if args.precision == "autocast" else nullcontext
+    precision_scope = autocast if precision == "autocast" else nullcontext
     with torch.no_grad():
         with precision_scope("cuda"):
             with model.ema_scope():
                 for prompts in data:
                     uc = None
-                    if args.scale != 1.0:
+                    if scale != 1.0:
                         uc = model.get_learned_conditioning(batch_size * [""])
                     if isinstance(prompts, tuple):
                         prompts = list(prompts)
+
+                    print(f'Prompts when Generating: {prompts}')
+
                     c = model.get_learned_conditioning(prompts)
 
-                    if args.init_c != None:
-                        c = args.init_c
+                    if init_c != None:
+                        c = init_c
 
-                    if args.sampler in ["klms","dpm2","dpm2_ancestral","heun","euler","euler_ancestral"]:
+                    if samplern in ["klms","dpm2","dpm2_ancestral","heun","euler","euler_ancestral"]:
                         samples = sampler_fn(
                             c=c,
                             uc=uc,
-                            args=args,
+                            C=C,
+                            H=H,
+                            f=f,
+                            W=W,
+                            steps=steps,
+                            use_init=use_init,
+                            n_samples=n_samples,
+                            samplern=samplern,
+                            scale=scale,
                             model_wrap=model_wrap,
                             init_latent=init_latent,
                             t_enc=t_enc,
                             device=device,
                             cb=callback)
                     else:
-                        # args.sampler == 'plms' or args.sampler == 'ddim':
-                        if init_latent is not None and args.strength > 0:
+                        # samplern == 'plms' or samplern == 'ddim':
+                        if init_latent is not None and strength > 0:
                             z_enc = sampler.stochastic_encode(init_latent, torch.tensor([t_enc]*batch_size).to(device))
                         else:
-                            z_enc = torch.randn([args.n_samples, args.C, args.H // args.f, args.W // args.f], device=device)
-                        if args.sampler == 'ddim':
+                            z_enc = torch.randn([n_samples, C, H // f, W // f], device=device)
+                        if samplern == 'ddim':
                             samples = sampler.decode(z_enc,
                                                      c,
                                                      t_enc,
-                                                     unconditional_guidance_scale=args.scale,
+                                                     unconditional_guidance_scale=scale,
                                                      unconditional_conditioning=uc,
                                                      img_callback=callback)
-                        elif args.sampler == 'plms': # no "decode" function in plms, so use "sample"
-                            shape = [args.C, args.H // args.f, args.W // args.f]
-                            samples, _ = sampler.sample(S=args.steps,
+                        elif samplern == 'plms': # no "decode" function in plms, so use "sample"
+                            shape = [C, H // f, W // f]
+                            samples, _ = sampler.sample(S=steps,
                                                             conditioning=c,
-                                                            batch_size=args.n_samples,
+                                                            batch_size=n_samples,
                                                             shape=shape,
                                                             verbose=False,
-                                                            unconditional_guidance_scale=args.scale,
+                                                            unconditional_guidance_scale=scale,
                                                             unconditional_conditioning=uc,
-                                                            eta=args.ddim_eta,
+                                                            eta=ddim_eta,
                                                             x_T=z_enc,
                                                             img_callback=callback)
                         else:
-                            raise Exception(f"Sampler {args.sampler} not recognised.")
+                            raise Exception(f"Sampler {samplern} not recognised.")
 
                     if return_latent:
                         results.append(samples.clone())
@@ -776,8 +854,8 @@ def generate(args, return_latent=False, return_sample=False, return_c=False):
                     for x_sample in x_samples:
                         x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
                         image = Image.fromarray(x_sample.astype(np.uint8))
-                        if args.GFPGAN:
-                            image = FACE_RESTORATION(image, args.bg_upsampling, args.upscale).astype(np.uint8)
+                        if GFPGAN:
+                            image = FACE_RESTORATION(image, bg_upsampling, upscale).astype(np.uint8)
                             image = Image.fromarray(image)
                         else:
                             image = image
@@ -786,69 +864,21 @@ def generate(args, return_latent=False, return_sample=False, return_c=False):
                         results.append(image)
     return results
 
-def sample_model(input_im, model_var, sampler, precision, h, w, ddim_steps, n_samples, scale, ddim_eta):
-    model_var.to("cuda")
-    precision_scope = autocast if precision=="autocast" else nullcontext
-    with torch.no_grad():
-        with precision_scope('cuda'):
-            with model_var.ema_scope():
-                c = model_var.get_learned_conditioning(input_im).tile(n_samples,1,1)
 
-                if scale != 1.0:
-                    uc = torch.zeros_like(c)
-                else:
-                    uc = None
-
-                shape = [4, h // 8, w // 8]
-                samples_ddim, _ = sampler.sample(S=ddim_steps,
-                                                 conditioning=c,
-                                                 batch_size=n_samples,
-                                                 shape=shape,
-                                                 verbose=False,
-                                                 unconditional_guidance_scale=scale,
-                                                 unconditional_conditioning=uc,
-                                                 eta=ddim_eta,
-                                                 x_T=None)
-
-                x_samples_ddim = model_var.decode_first_stage(samples_ddim)
-                img = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0).cpu()
-                del x_samples_ddim
-                del samples_ddim
-                del c
-                mem = torch.cuda.memory_allocated()/1e6
-                model_var.to('cpu')
-                while(torch.cuda.memory_allocated()/1e6 >= mem):
-                    time.sleep(1)
-                return img
-
-def load_var_model_from_config(config_var, ckpt_var, device, verbose=False, half_precision=True):
-    #model.to("cpu")
-    torch_gc()
-    print(f"Loading model from {ckpt_var}")
-    pl_sd = torch.load(ckpt_var, map_location=device)
-    if "global_step" in pl_sd:
-        print(f"Global Step: {pl_sd['global_step']}")
-    sd = pl_sd["state_dict"]
-    model_var = instantiate_from_config(config_var.model)
-    m, u = model_var.load_state_dict(sd, strict=False)
-    if len(m) > 0 and verbose:
-        print("missing keys:")
-        print(m)
-    if len(u) > 0 and verbose:
-        print("unexpected keys:")
-        print(u)
-    #model.to("cpu")
-    torch_gc()
-    model_var.half().to(device)
-    model_var.eval()
-    return model_var
-ckpt_var="/gdrive/MyDrive/sd-clip-vit-l14-img-embed_ema_only.ckpt"
-config_var="stable-diffusion-gradio-anim-opt/configs/stable-diffusion/sd-image-condition-finetune.yaml"
-config_var = OmegaConf.load(config_var)
-
-device='cpu'
-model_var = load_var_model_from_config(config_var, ckpt_var, device)
-device='cuda'
+def next_seed(seed, seed_behavior):
+    if seed_behavior == 'iter':
+        if seed == -1:
+            seed = random.randint(0, 2**32)
+        else:
+            seed += 1
+    elif seed_behavior == 'fixed':
+        if seed == -1:
+            seed = random.randint(0, 2**32)
+        else:
+            pass # always keep seed the same
+    else:
+        seed = random.randint(0, 2**32)
+    return seed
 
 
 def parse_key_frames(string, prompt_parser=None):
@@ -866,7 +896,7 @@ def parse_key_frames(string, prompt_parser=None):
         raise RuntimeError('Key Frame string not correctly formatted')
     return frames
 
-def render_image_batch(batch_args):
+#def render_image_batch(batch_args):
         #    display.clear_output(wait=True)
         #    display.display(grid_image)
 
@@ -925,15 +955,14 @@ def variations(input_im, outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_
     torch_gc()
     return paths
 
-def batch_dict(def run_batch(b_prompts, b_name, b_outdir, b_max_frames, b_GFPGAN, b_bg_upsampling, b_upscale, b_W, b_H, b_steps, b_scale, b_seed_behavior, b_seed, b_sampler, b_save_grid, b_save_settings, b_save_samples, b_n_batch, b_n_samples, b_ddim_eta, b_use_init, b_init_image, b_strength, b_make_grid):
+def batch_dict(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling, b_upscale, b_W, b_H, b_steps, b_scale, b_seed_behavior, b_seed, b_sampler, b_save_grid, b_save_settings, b_save_samples, b_n_batch, b_n_samples, b_ddim_eta, b_use_init, b_init_image, b_strength, b_make_grid):
     return locals()
 
-def run_batch(b_prompts, b_name, b_outdir, b_max_frames, b_GFPGAN, b_bg_upsampling, b_upscale, b_W, b_H, b_steps, b_scale, b_seed_behavior, b_seed, b_sampler, b_save_grid, b_save_settings, b_save_samples, b_n_batch, b_n_samples, b_ddim_eta, b_use_init, b_init_image, b_strength, b_make_grid):
+def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling, b_upscale, b_W, b_H, b_steps, b_scale, b_seed_behavior, b_seed, b_sampler, b_save_grid, b_save_settings, b_save_samples, b_n_batch, b_n_samples, b_ddim_eta, b_use_init, b_init_image, b_strength, b_make_grid, b_init_img_array):
 
         batchargs = SimpleNamespace(**batch_dict(b_prompts,
                                                 b_name,
                                                 b_outdir,
-                                                b_max_frames,
                                                 b_GFPGAN,
                                                 b_bg_upsampling,
                                                 b_upscale,
@@ -953,27 +982,46 @@ def run_batch(b_prompts, b_name, b_outdir, b_max_frames, b_GFPGAN, b_bg_upsampli
                                                 b_use_init,
                                                 b_init_image,
                                                 b_strength,
-                                                b_make_grid))
+                                                b_make_grid
+        ))
 
         model.to('cuda')
         #b_prompts = prompts
 
-        b_prompts = list(b_animation_prompts.split("\n"))
+        b_prompts = list(b_prompts.split("\n"))
+
         # create output folder for the batch
         os.makedirs(b_outdir, exist_ok=True)
         if b_save_settings or b_save_samples:
-            print(f"Saving to {os.path.join(b_outdir, b_timestring)}_*")
+            print(f"Saving to {b_outdir}_*")
 
-        # save settings for the batch
-        #if b_save_settings:
-        #    filename = os.path.join(b_outdir, f"{b_timestring}_settings.txt")
-        #    with open(filename, "w+", encoding="utf-8") as f:
-        #        json.dump(dict(b___dict__), f, ensure_ascii=False, indent=4)
+        #save settings for the batch
+        if b_save_settings:
+            filename = os.path.join(b_outdir, f"{b_name}_{b_seed}_{random.randint(10000, 99999)}_settings.txt")
+            with open(filename, "w+", encoding="utf-8") as f:
+                json.dump(dict(batchargs.__dict__), f, ensure_ascii=False, indent=4)
 
         index = 0
         all_images = []
+        b_outputs = []
+
         # function for init image batching
         init_array = []
+        #Defaults needed by def generate()
+        b_init_latent = None
+        b_init_sample = None
+        b_init_c = None
+        b_mask_contrast_adjust = 1.0
+        b_mask_brightness_adjust = 1.0
+        b_invert_mask = False
+        b_use_mask = False
+        dynamic_threshold = None
+        static_threshold = None
+        precision = 'autocast'
+        #fixed_code = True
+        C = 4
+        f = 8
+
 
         if b_init_img_array != None:
             initdir = f'{b_outdir}/init'
@@ -982,6 +1030,11 @@ def run_batch(b_prompts, b_name, b_outdir, b_max_frames, b_GFPGAN, b_bg_upsampli
             b_mask_file = f'{b_outdir}/init/mask.png'
             b_init_img_array['image'].save(os.path.join(b_outdir, b_init_image))
             b_init_img_array['mask'].save(os.path.join(b_outdir, b_mask_file))
+        else:
+            b_mask_file = ""
+            b_mask_contrast_adjust = 1.0
+            b_mask_brightness_adjust = 1.0
+            b_invert_mask = False
 
         if b_use_init:
             if b_init_image == "":
@@ -1004,7 +1057,8 @@ def run_batch(b_prompts, b_name, b_outdir, b_max_frames, b_GFPGAN, b_bg_upsampli
 
         for iprompt, prompt in enumerate(b_prompts):
             b_prompt = b_prompts[iprompt]
-
+            b_sanitized = sanitize(b_prompt)
+            b_sanitized = f'{b_sanitized[:128]}_{b_seed}_{random.randint(10000, 99999)}'
 
 
             for batch_index in range(b_n_batch):
@@ -1015,35 +1069,50 @@ def run_batch(b_prompts, b_name, b_outdir, b_max_frames, b_GFPGAN, b_bg_upsampli
                 for image in init_array: # iterates the init images
                     b_init_image = image
                     print(f'USING SEED FOR BATCH:{b_seed}')
-                    results = generate(args)
+
+                    results = generate(prompt=b_prompts[iprompt], name=b_name, outdir=b_outdir,
+                                       GFPGAN=b_GFPGAN, bg_upsampling=b_bg_upsampling, upscale=b_upscale,
+                                       W=b_W, H=b_H, steps=b_steps, scale=b_scale, seed=b_seed,
+                                       samplern=b_sampler, n_batch=b_n_batch, n_samples=b_n_samples, ddim_eta=b_ddim_eta,
+                                       use_init=b_use_init, init_image=b_init_image,
+                                       init_sample=b_init_sample, strength=b_strength,
+                                       use_mask=b_use_mask, mask_file=b_mask_file,
+                                       mask_contrast_adjust=b_mask_contrast_adjust,
+                                       mask_brightness_adjust=b_mask_brightness_adjust, invert_mask=b_invert_mask,
+                                       dynamic_threshold=None, static_threshold=None, C=4, f=8, init_c=None)
+
+
                     for image in results:
                         #all_images.append(results[image])
                         if b_make_grid:
                             all_images.append(T.functional.pil_to_tensor(image))
                         if b_save_samples:
-                            print(f"Filename: {b_timestring}_{index:05}_{b_seed}.png")
-                            print(f"{b_outdir}/{b_timestring}_{index:05}_{b_seed}.png")
-                            filename = f"{b_timestring}_{index:05}_{b_seed}.png"
-                            fpath = f"{b_outdir}/{b_timestring}_{index:05}_{b_seed}.png"
-                            image.save(os.path.join(b_outdir, filename))
-                            b_outputs.append(fpath)
-                            print(f"Filepath List: {b_outputs}")
+                            print(f"{b_outdir}/{b_sanitized}_{index:05}_{b_seed}.png")
+
+                            b_filename = (f"{b_sanitized}_{index:05}.png")
+                            b_fpath = (f"{b_outdir}/{b_filename}")
+                            print(f"File at: {b_fpath}")
+
+                            image.save(os.path.join(b_outdir, b_filename))
+                            b_outputs.append(b_fpath)
                         #if b_display_samples:
                         #    display.display(image)
                         index += 1
                     if b_seed_behavior != 'fixed':
-                        b_seed = next_seed(args)
+                        b_seed = next_seed(b_seed, b_seed_behavior)
 
-            #print(len(all_images))
+        print(f"Filepath List: {b_outputs}")
+
         if b_make_grid:
             b_grid_rows = 2
             grid = mkgrid(all_images, nrow=int(len(all_images)/b_grid_rows))
             grid = rearrange(grid, 'c h w -> h w c').cpu().numpy()
-            filename = f"{b_timestring}_{iprompt:05d}_grid_{b_seed}.png"
+            grid_filename = f"{b_sanitized}_{b_name}_{iprompt:05d}_grid_{random.randint(10000, 99999)}.png"
             grid_image = Image.fromarray(grid.astype(np.uint8))
-            grid_image.save(os.path.join(b_outdir, filename))
-            gpath = f"{b_outdir}/{b_timestring}_{iprompt:05d}_grid_{b_seed}.png"
-            b_outputs.append(gpath)
+            grid_image.save(os.path.join(b_outdir, grid_filename))
+            grid_path = f"{b_outdir}/{grid_filename}"
+            b_outputs.append(grid_path)
+        return b_outputs
 
 def anim_dict(animation_prompts, prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode, init_img_array, use_mask, mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust):
 
@@ -1062,6 +1131,26 @@ def anim_dict(animation_prompts, prompts, animation_mode, strength, max_frames, 
 
 
 def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts: str, batch_name: str, outdir: str, max_frames: int, GFPGAN: bool, bg_upsampling: bool, upscale: int, W: int, H: int, steps: int, scale: int, angle: str, zoom: str, translation_x: str, translation_y: str, translation_z: str, rotation_3d_x: str, rotation_3d_y: str, rotation_3d_z: str, use_depth_warping: bool, midas_weight: float, near_plane: int, far_plane: int, fov: int, padding_mode: str, sampling_mode: str, seed_behavior: str, seed: str, interp_spline: str, noise_schedule: str, strength_schedule: str, contrast_schedule: str, sampler: str, extract_nth_frame: int, interpolate_x_frames: int, border: str, color_coherence: str, previous_frame_noise: float, previous_frame_strength: float, video_init_path: str, save_grid: bool, save_settings: bool, save_samples: bool, display_samples: bool, n_batch: int, n_samples: int, ddim_eta: float, use_init: bool, init_image: str, strength: float, timestring: str, resume_from_timestring: bool, resume_timestring: str, make_grid: bool, init_img_array, use_mask, mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust):
+
+
+    #Load Default Values
+    index = 0
+    # function for init image batching
+    init_array = []
+    #Defaults needed by def generate()
+    init_latent = None
+    init_sample = None
+    init_c = None
+    mask_contrast_adjust = 1.0
+    mask_brightness_adjust = 1.0
+    invert_mask = False
+    use_mask = False
+    dynamic_threshold = None
+    static_threshold = None
+    precision = 'autocast'
+    #fixed_code = True
+    C = 4
+    f = 8
 
     images = []
     results = []
@@ -1135,22 +1224,22 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
         torch.cuda.empty_cache()
         return result
 
-    def DeformAnimKeys(args):
-        args.angle_series = get_inbetweens(parse_key_frames(args.angle))
-        args.zoom_series = get_inbetweens(parse_key_frames(args.zoom))
-        args.translation_x_series = get_inbetweens(parse_key_frames(args.translation_x))
-        args.translation_y_series = get_inbetweens(parse_key_frames(args.translation_y))
-        args.translation_z_series = get_inbetweens(parse_key_frames(args.translation_z))
-        args.rotation_3d_x_series = get_inbetweens(parse_key_frames(args.rotation_3d_x))
-        args.rotation_3d_y_series = get_inbetweens(parse_key_frames(args.rotation_3d_y))
-        args.rotation_3d_z_series = get_inbetweens(parse_key_frames(args.rotation_3d_z))
-        args.noise_schedule_series = get_inbetweens(parse_key_frames(args.noise_schedule))
-        args.strength_schedule_series = get_inbetweens(parse_key_frames(args.strength_schedule))
-        args.contrast_schedule_series = get_inbetweens(parse_key_frames(args.contrast_schedule))
+    def DeformAnimKeys(angle, zoom, translation_x, translation_y, translation_z, rotation_3d_x, rotation_3d_y, rotation_3d_z, noise_schedule, strength_schedule, contrast_schedule):
+        angle_series = get_inbetweens(parse_key_frames(args.angle))
+        zoom_series = get_inbetweens(parse_key_frames(args.zoom))
+        translation_x_series = get_inbetweens(parse_key_frames(args.translation_x))
+        translation_y_series = get_inbetweens(parse_key_frames(args.translation_y))
+        translation_z_series = get_inbetweens(parse_key_frames(args.translation_z))
+        rotation_3d_x_series = get_inbetweens(parse_key_frames(args.rotation_3d_x))
+        rotation_3d_y_series = get_inbetweens(parse_key_frames(args.rotation_3d_y))
+        rotation_3d_z_series = get_inbetweens(parse_key_frames(args.rotation_3d_z))
+        noise_schedule_series = get_inbetweens(parse_key_frames(args.noise_schedule))
+        strength_schedule_series = get_inbetweens(parse_key_frames(args.strength_schedule))
+        contrast_schedule_series = get_inbetweens(parse_key_frames(args.contrast_schedule))
 
     def render_animation(args):
-        prom = args.animation_prompts
-        key = args.prompts
+        prom = animation_prompts
+        key = prompts
 
         new_prom = list(prom.split("\n"))
         new_key = list(key.split("\n"))
@@ -1164,15 +1253,15 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
 
         # resume animation
         start_frame = 0
-        if args.resume_from_timestring:
-            for tmp in os.listdir(args.outdir):
-                if tmp.split("_")[0] == args.resume_timestring:
+        if resume_from_timestring:
+            for tmp in os.listdir(outdir):
+                if tmp.split("_")[0] == resume_timestring:
                     start_frame += 1
             start_frame = start_frame - 1
 
         # create output folder for the batch
-        os.makedirs(args.outdir, exist_ok=True)
-        print(f"Saving animation frames to {args.outdir}")
+        os.makedirs(outdir, exist_ok=True)
+        print(f"Saving animation frames to {outdir}")
 
         #save settings for the batch
         #settings_filename = os.path.join(args.outdir, f"{args.timestring}_settings.txt")
@@ -1278,7 +1367,8 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
                 args.init_image = init_frame
 
             # sample the diffusion model
-            results = generate(args, return_latent=False, return_sample=True)
+            results = generate(seed, outdir, sampler, n_samples, prompt, init_latent, init_sample, use_init, init_image, strength, use_mask, mask_file, mask_contrast_adjust, mask_brightness_adjust, invert_mask, steps, ddim_eta, dynamic_threshold, static_threshold, C, f, H, W, scale, init_c, b_GFPGAN, b_bg_upsampling, b_upscale, return_latent=False, return_sample=True)
+
             sample, image = results[0], results[1]
 
             filename = f"{args.timestring}_{frame_idx:05}.png"
@@ -1288,14 +1378,6 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
 
             args.seed = next_seed(args)
 
-    def next_seed(args):
-        if args.seed_behavior == 'iter':
-            args.seed += 1
-        elif args.seed_behavior == 'fixed':
-            pass # always keep seed the same
-        else:
-            args.seed = random.randint(0, 2**32)
-        return args.seed
 
     def make_xform_2d(width, height, translation_x, translation_y, angle, scale):
         center = (width // 2, height // 2)
@@ -1439,7 +1521,7 @@ def anim(animation_mode: str, animation_prompts: str, key_frames: bool, prompts:
     anim_dict(animation_prompts, prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode, init_img_array, use_mask, mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust)
 
 
-    anim_args = SimpleNamespace(**arger(animation_prompts, prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode, init_img_array, use_mask, mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust))
+    anim_args = SimpleNamespace(**arger(animation_prompts, prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode))
 
 
     args.outputs = []
@@ -1671,16 +1753,13 @@ with demo:
         with gr.TabItem('Batch Prompts'):
             with gr.Row():
                 with gr.Column():
-                    b_animation_mode = gr.Dropdown(label='Animation Mode',
-                                                    choices=['None', '2D', '3D', 'Video Input', 'Interpolation'],
-                                                    value='None',
-                                                    visible=False)#animation_mode
+                    b_init_img_array = gr.Image(visible=False)
 
                     b_sampler = gr.Radio(label='Sampler',
                                         choices=['klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim'],
                                         value='klms',
                                         interactive=True)#sampler
-                    b_animation_prompts = gr.Textbox(label='Prompts',
+                    b_prompts = gr.Textbox(label='Prompts',
                                                     placeholder='a beautiful forest by Asher Brown Durand, trending on Artstation\na beautiful city by Asher Brown Durand, trending on Artstation',
                                                     lines=5)#animation_prompts
                     b_seed_behavior = gr.Dropdown(label='Seed Behavior', choices=['iter', 'fixed', 'random'], value='iter', interactive=True)#seed_behavior
@@ -1692,10 +1771,11 @@ with demo:
                     b_ddim_eta = gr.Slider(minimum=0, maximum=1.0, step=0.1, label='DDIM ETA', value=0.0)#ddim_eta
                     b_use_init = gr.Checkbox(label='Use Init', value=False, visible=True)#use_init
                     b_init_image = gr.Textbox(label='Init Image link',  placeholder='https://cdn.pixabay.com/photo/2022/07/30/13/10/green-longhorn-beetle-7353749_1280.jpg', lines=1)#init_image
-                    b_strength = gr.Slider(minimum=0, maximum=1, step=0.1, label='Init Image Strength', value=0.5, interactive=True)#strength
+                    b_strength = gr.Slider(minimum=0, maximum=1, step=0.1, label='Init Image Strength', value=0.0, interactive=True)#strength
                     b_make_grid = gr.Checkbox(label='Make Grid', value=False, visible=True)#make_grid
-                    b_use_mask = gr.Checkbox(label='Use Mask', value=False, visible=False)
-                    b_mask_file = gr.Textbox(label='Mask File', value='', visible=False) #
+                    b_use_mask = gr.Checkbox(label='Use Mask', value=False, visible=True)
+                    b_save_grid = gr.Checkbox(label='Save Grid', value=False, visible=True)
+                    b_mask_file = gr.Textbox(label='Mask File', value='', visible=True) #
                 with gr.Column():
                     batch_outputs = gr.Gallery()
                     b_GFPGAN = gr.Checkbox(label='GFPGAN, Face Resto, Upscale', value=False)
@@ -1705,12 +1785,13 @@ with demo:
                     b_H = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)#height
                     b_steps = gr.Slider(minimum=1, maximum=300, step=1, label='Steps', value=100, interactive=True)#steps
                     b_scale = gr.Slider(minimum=1, maximum=25, step=1, label='Scale', value=11, interactive=True)#scale
-                    b_batch_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
-                    b_outdir = gr.Textbox(label='Output Dir',  placeholder='/content/', lines=1, value='/gdrive/MyDrive/sd_anims/', interactive=True)#outdir
+                    b_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
+                    b_outdir = gr.Textbox(label='Output Dir',  placeholder='/content/', lines=1, value='/gdrive/MyDrive/sd_anims', interactive=True)#outdir
                     batch_btn = gr.Button('Generate')
         with gr.TabItem('InPainting'):
             with gr.Row():
                 with gr.Column():
+
                     refresh_btn = gr.Button('Refresh')
                     inPaint = gr.Image(value=inPaint, source="upload", interactive=True,
                                                                       type="pil", tool="sketch", visible=True,
@@ -1814,20 +1895,8 @@ with demo:
     resume_from_timestring, resume_timestring, make_grid, inPaint, b_use_mask,
     b_mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust]
 
-    batch_inputs = [b_animation_mode, b_animation_prompts, key_frames,
-    prompts, b_batch_name, b_outdir, max_frames, b_GFPGAN,
-    b_bg_upsampling, b_upscale, b_W, b_H, b_steps, b_scale,
-    angle, zoom, translation_x, translation_y, translation_z,
-    rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping,
-    midas_weight, near_plane, far_plane, fov, padding_mode,
-    sampling_mode, b_seed_behavior, b_seed, interp_spline, noise_schedule,
-    strength_schedule, contrast_schedule, sampler, extract_nth_frame,
-    interpolate_x_frames, border, color_coherence, previous_frame_noise,
-    previous_frame_strength, video_init_path, save_grid, b_save_settings,
-    b_save_samples, display_samples, b_n_batch, b_n_samples, b_ddim_eta,
-    b_use_init, b_init_image, b_strength, timestring,
-    resume_from_timestring, resume_timestring, b_make_grid, inPaint, b_use_mask,
-    b_mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust]
+
+    batch_inputs = [b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling, b_upscale, b_W, b_H, b_steps, b_scale, b_seed_behavior, b_seed, b_sampler, b_save_grid, b_save_settings, b_save_samples, b_n_batch, b_n_samples, b_ddim_eta, b_use_init, b_init_image, b_strength, b_make_grid, b_init_img_array]
 
     mask_inputs = [i_animation_mode, i_animation_prompts, key_frames,
     prompts, i_batch_name, i_outdir, i_max_frames, i_GFPGAN,
@@ -1844,29 +1913,17 @@ with demo:
     resume_from_timestring, resume_timestring, make_grid, inPaint, use_mask,
     mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust]
 
-
-
-
-
-
-
     anim_outputs = [mp4_paths]
     batch_outputs = [batch_outputs]
     inPaint_outputs = [inPainted]
 
-    #print(anim_output)
-    #print(anim_outputs)
-    #mp4_paths.append('/gdrive/MyDrive/sd_anims/upscales/20220902151451/20220902151451.mp4')
-
-    #print(f'orig: {mp4_paths}')
-    #print(f'list: {list(mp4_paths)}')
     var_btn.click(variations, inputs=var_inputs, outputs=var_outputs)
     soup_btn.click(fn=process_noodle_soup, inputs=soup_inputs, outputs=soup_outputs)
 
     refresh_btn.click(refresh, inputs=inPaint, outputs=inPaint)
     inPaint_btn.click(fn=anim, inputs=mask_inputs, outputs=inPaint_outputs)
     anim_btn.click(fn=anim, inputs=anim_inputs, outputs=anim_outputs)
-    batch_btn.click(fn=anim, inputs=batch_inputs, outputs=batch_outputs)
+    batch_btn.click(fn=run_batch, inputs=batch_inputs, outputs=batch_outputs)
 
 class ServerLauncher(threading.Thread):
     def __init__(self, demo):
@@ -1878,17 +1935,27 @@ class ServerLauncher(threading.Thread):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         gradio_params = {
-            'server_port': 7860,
-            'show_error': True,
+            'inbrowser': True,
             'server_name': '0.0.0.0',
-            #'share': True
-            #'share': opt.share
+            'server_port': 7860,
+            'share': True,
+            'show_error': True
         }
         #if not opt.share:
-        #demo.queue(concurrency_count=1)
+        demo.queue(concurrency_count=3)
         #if opt.share and opt.share_password:
         #    gradio_params['auth'] = ('webui', opt.share_password)
-        self.demo.launch(**gradio_params)
+
+        # Check to see if Port 7860 is open
+        port_status = 1
+        while port_status != 0:
+            try:
+                self.demo.launch(**gradio_params)
+            except (OSError) as e:
+                print (f'Error: Port: {opt.port} is not open yet. Please wait, this may take upwards of 60 seconds...')
+                time.sleep(10)
+            else:
+                port_status = 0
 
     def stop(self):
         self.demo.close() # this tends to hang
