@@ -1731,6 +1731,8 @@ soup_help2 ="""
   * _photo-term_ - A list of photography terms relating to photos
   """
 
+prompt_placeholder = "First Prompt\nSecond Prompt\nThird Prompt\n\nMake sure your prompts are divided by having them in separate lines."
+keyframe_placeholder = "0\n25\n50\n\nMake sure you only have numbers here, and they are all in new lines, without empty lines."
 list1 = []
 if opt.cfg_path == "" or opt.cfg_path == None:
   opt.cfg_path = "/gdrive/MyDrive/sd_anim_configs"
@@ -1747,15 +1749,15 @@ with demo:
                     batch_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
                     outdir = gr.Textbox(label='Output Dir',  placeholder='/content', lines=1, value='/gdrive/MyDrive/sd_anims', interactive=True)#outdir
                     animation_prompts = gr.Textbox(label='Prompts - divided by enter',
-                                                    placeholder='a beautiful forest by Asher Brown Durand, trending on Artstation\na beautiful city by Asher Brown Durand, trending on Artstation',
+                                                    placeholder=prompt_placeholder,
                                                     lines=5, interactive=True)#animation_prompts
                     key_frames = gr.Checkbox(label='KeyFrames',
                                             value=True,
                                             visible=False, interactive=True)#key_frames
                     prompts = gr.Textbox(label='Keyframes - numbers divided by enter',
-                                        placeholder='0',
+                                        placeholder=keyframe_placeholder,
                                         lines=5,
-                                        value='0', interactive=True)#prompts
+                                        interactive=True)#prompts
                     anim_btn = gr.Button('Generate')
                     with gr.Row():
                         save_cfg_btn = gr.Button('save config snapshot')
