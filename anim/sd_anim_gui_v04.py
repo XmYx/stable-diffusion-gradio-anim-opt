@@ -1726,6 +1726,10 @@ soup_help2 ="""
   * _photo-term_ - A list of photography terms relating to photos
   """
 list1 = []
+os.makedirs('/gdrive/MyDrive/sd_anim/configs/', exist_ok=True)
+for files in os.listdir('/gdrive/MyDrive/sd_anim/configs/'):
+    if files.endswith(".txt"):
+        list1.append(files)
 with demo:
     with gr.Tabs():
         with gr.TabItem('Animation'):
@@ -1744,7 +1748,9 @@ with demo:
                                         lines=5,
                                         value='0', interactive=True)#prompts
                     anim_btn = gr.Button('Generate')
-                    save_cfg_btn = gr.Button('save config snapshot')
+                    with gr.Row():
+                        save_cfg_btn = gr.Button('save config snapshot')
+                        load_cfg_btn = gr.Button('load config snapshot')
                     cfg_snapshots = gr.Dropdown(label = 'config snapshots (loading is WIP)', choices = list1, interactive=True)
                 with gr.Column(scale=1.6):
                         mp4_paths = gr.Video(label='Generated Video')
@@ -1999,19 +2005,26 @@ with demo:
                         rotation_3d_z, use_depth_warping, midas_weight, near_plane,
                         far_plane, fov, padding_mode, sampling_mode):
                             anim_args = SimpleNamespace(**anim_dict(animation_prompts, prompts, animation_mode,strength, max_frames, border, key_frames,interp_spline, angle, zoom, translation_x,translation_y, translation_z, color_coherence,previous_frame_noise, previous_frame_strength,video_init_path, extract_nth_frame, interpolate_x_frames,batch_name, outdir, save_grid, save_settings, save_samples,display_samples, n_samples, W, H, init_image, seed, sampler,steps, scale, ddim_eta, seed_behavior, n_batch, use_init,timestring, noise_schedule, strength_schedule, contrast_schedule,resume_from_timestring, resume_timestring, make_grid,GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y,rotation_3d_z, use_depth_warping, midas_weight, near_plane,far_plane, fov, padding_mode, sampling_mode))
-                            os.makedirs('/content/configs', exist_ok=True)
+                            os.makedirs('/gdrive/MyDrive/sd_anim/configs/', exist_ok=True)
                             #filename = "/content/configs/test.txt"
                             #pseudoFilename = "test"
-                            filename = f"{outdir}/{batch_name}_{random.randint(10000, 99999)}_settings_snapshot.txt"
+                            filename = f'/gdrive/MyDrive/sd_anim/configs/{batch_name}_{random.randint(10000, 99999)}_settings_snapshot.txt'
                             with open(filename, "w+", encoding="utf-8") as f:
                                 json.dump(dict(anim_args.__dict__), f, ensure_ascii=False, indent=4)
-                            #list1 = []
-                            for files in os.listdir('/content/configs'):
+                            list1 = []
+                            for files in os.listdir('/gdrive/MyDrive/sd_anim/configs/'):
                                 if files.endswith(".txt"):
                                     list1.append(files)
                             return gr.Dropdown.update(choices=list1)
 
+    def loadSnapshot(snapshotFile):
+        path = f'/gdrive/MyDrive/sd_anim/configs/{snapshotFile}'
+        cfgfile = open(path)
+        cfg = json.load(cfgfile)
+        cfg = SimpleNamespace(**cfg)
+        cfgfile.close()
 
+        return cfg.animation_prompts, cfg.prompts, cfg.animation_mode,cfg.strength, cfg.max_frames, cfg.border, cfg.key_frames,cfg.interp_spline, cfg.angle, cfg.zoom, cfg.translation_x,cfg.translation_y, cfg.translation_z, cfg.color_coherence,cfg.previous_frame_noise, cfg.previous_frame_strength,cfg.video_init_path, cfg.extract_nth_frame, cfg.interpolate_x_frames,cfg.batch_name, cfg.outdir, cfg.save_grid, cfg.save_settings, cfg.save_samples,cfg.display_samples, cfg.n_samples, cfg.W, cfg.H, cfg.init_image, cfg.seed, cfg.sampler,cfg.steps, cfg.scale, cfg.ddim_eta, cfg.seed_behavior, cfg.n_batch, cfg.use_init,cfg.timestring, cfg.noise_schedule, cfg.strength_schedule, cfg.contrast_schedule,cfg.resume_from_timestring, cfg.resume_timestring, cfg.make_grid,cfg.GFPGAN, cfg.bg_upsampling, cfg.upscale, cfg.rotation_3d_x, cfg.rotation_3d_y,cfg.rotation_3d_z, cfg.use_depth_warping, cfg.midas_weight, cfg.near_plane,cfg.far_plane, cfg.fov, cfg.padding_mode, cfg.sampling_mode
 
 
     def kb_build(string, frame, value):
@@ -2082,6 +2095,7 @@ with demo:
     batch_outputs = [batch_outputs]
     inPaint_outputs = [inPainted]
 
+    load_cfg_btn.click(fn=loadSnapshot, inputs=anim_cfg_outputs, outputs=anim_cfg_inputs)
     var_btn.click(variations, inputs=var_inputs, outputs=var_outputs)
     soup_btn.click(fn=process_noodle_soup, inputs=soup_inputs, outputs=soup_outputs)
     save_cfg_btn.click(fn=saveSnapshot, inputs=anim_cfg_inputs, outputs=anim_cfg_outputs)
