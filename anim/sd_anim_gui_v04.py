@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import pandas as pd
 import random
+from pandas.core.indexing import Sequence
 import requests
 import torch, torchvision
 from torchvision import transforms
@@ -34,6 +35,8 @@ parser.add_argument("--cli", type=str, help="don't launch web server, take Pytho
 parser.add_argument("--ckpt", type=str, help="Model Path", default=None)
 parser.add_argument("--no_var", type=str, help="Variations Model Path", default=None)
 parser.add_argument("--var_ckpt", type=str, help="Variations Model Path", default=None)
+parser.add_argument("--cfg_path", type=str, help="Config Snapshots Path", default=None)
+
 opt = parser.parse_args()
 
 sys.path.extend([
@@ -1725,6 +1728,7 @@ soup_help2 ="""
   * _focal-length_ - A list of focal length ranges
   * _photo-term_ - A list of photography terms relating to photos
   """
+
 list1 = []
 os.makedirs('/gdrive/MyDrive/sd_anim/configs/', exist_ok=True)
 for files in os.listdir('/gdrive/MyDrive/sd_anim/configs/'):
@@ -1843,6 +1847,12 @@ with demo:
                       video_init_path = gr.Textbox(label='Video init path',  placeholder='/content/video_in.mp4', lines=1)#video_init_path
                       strength = gr.Slider(minimum=0, maximum=1, step=0.1, label='Init Image Strength', value=0.0)#strength
 
+        with gr.TabItem('Animation Director'):
+            with gr.Column():
+                add_cfg_btn = gr.Button('add config snapshot to sequence')
+                cfg_seq_snapshots = gr.Dropdown(label = 'select snapshot to add', choices = list1, interactive=True)
+            with gr.Column():
+                sequence = gr.Textbox(label='sequence', lines = 10, interactive=True)
 
         with gr.TabItem('Batch Prompts'):
             with gr.Row():
@@ -2005,20 +2015,20 @@ with demo:
                         rotation_3d_z, use_depth_warping, midas_weight, near_plane,
                         far_plane, fov, padding_mode, sampling_mode):
                             anim_args = SimpleNamespace(**anim_dict(animation_prompts, prompts, animation_mode,strength, max_frames, border, key_frames,interp_spline, angle, zoom, translation_x,translation_y, translation_z, color_coherence,previous_frame_noise, previous_frame_strength,video_init_path, extract_nth_frame, interpolate_x_frames,batch_name, outdir, save_grid, save_settings, save_samples,display_samples, n_samples, W, H, init_image, seed, sampler,steps, scale, ddim_eta, seed_behavior, n_batch, use_init,timestring, noise_schedule, strength_schedule, contrast_schedule,resume_from_timestring, resume_timestring, make_grid,GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y,rotation_3d_z, use_depth_warping, midas_weight, near_plane,far_plane, fov, padding_mode, sampling_mode))
-                            os.makedirs('/gdrive/MyDrive/sd_anim/configs/', exist_ok=True)
+                            os.makedirs('{opt.cfg_path}', exist_ok=True)
                             #filename = "/content/configs/test.txt"
                             #pseudoFilename = "test"
-                            filename = f'/gdrive/MyDrive/sd_anim/configs/{batch_name}_{random.randint(10000, 99999)}_settings_snapshot.txt'
+                            filename = f'{opt.cfg_path}/{batch_name}_{random.randint(10000, 99999)}_settings_snapshot.txt'
                             with open(filename, "w+", encoding="utf-8") as f:
                                 json.dump(dict(anim_args.__dict__), f, ensure_ascii=False, indent=4)
                             list1 = []
-                            for files in os.listdir('/gdrive/MyDrive/sd_anim/configs/'):
+                            for files in os.listdir('{opt.cfg_path}'):
                                 if files.endswith(".txt"):
                                     list1.append(files)
-                            return gr.Dropdown.update(choices=list1)
+                            return gr.Dropdown.update(choices=list1), gr.Dropdown.update(choices=list1)
 
     def loadSnapshot(snapshotFile):
-        path = f'/gdrive/MyDrive/sd_anim/configs/{snapshotFile}'
+        path = f'{opt.cfg_path}/{snapshotFile}'
         cfgfile = open(path)
         cfg = json.load(cfgfile)
         cfg = SimpleNamespace(**cfg)
@@ -2026,6 +2036,12 @@ with demo:
 
         return cfg.animation_prompts, cfg.prompts, cfg.animation_mode,cfg.strength, cfg.max_frames, cfg.border, cfg.key_frames,cfg.interp_spline, cfg.angle, cfg.zoom, cfg.translation_x,cfg.translation_y, cfg.translation_z, cfg.color_coherence,cfg.previous_frame_noise, cfg.previous_frame_strength,cfg.video_init_path, cfg.extract_nth_frame, cfg.interpolate_x_frames,cfg.batch_name, cfg.outdir, cfg.save_grid, cfg.save_settings, cfg.save_samples,cfg.display_samples, cfg.n_samples, cfg.W, cfg.H, cfg.init_image, cfg.seed, cfg.sampler,cfg.steps, cfg.scale, cfg.ddim_eta, cfg.seed_behavior, cfg.n_batch, cfg.use_init,cfg.timestring, cfg.noise_schedule, cfg.strength_schedule, cfg.contrast_schedule,cfg.resume_from_timestring, cfg.resume_timestring, cfg.make_grid,cfg.GFPGAN, cfg.bg_upsampling, cfg.upscale, cfg.rotation_3d_x, cfg.rotation_3d_y,cfg.rotation_3d_z, cfg.use_depth_warping, cfg.midas_weight, cfg.near_plane,cfg.far_plane, cfg.fov, cfg.padding_mode, cfg.sampling_mode
 
+    def add_cfg_to_seq(cfg, seq):
+        if seq == "":
+            seq = f'{cfg}'
+        else:
+            seq = f'{seq}\n{cfg}'
+        return seq
 
     def kb_build(string, frame, value):
       if frame != "" and value != "":
@@ -2090,11 +2106,13 @@ with demo:
                         rotation_3d_z, use_depth_warping, midas_weight, near_plane,
                         far_plane, fov, padding_mode, sampling_mode]
 
-    anim_cfg_outputs = [cfg_snapshots]
+    anim_cfg_outputs = [cfg_snapshots, cfg_seq_snapshots]
+    add_cfg_inputs = [cfg_seq_snapshots, sequence]
+    add_cfg_outputs = [sequence]
 
     batch_outputs = [batch_outputs]
     inPaint_outputs = [inPainted]
-
+    add_cfg_btn.click(fn=add_cfg_to_seq, inputs=add_cfg_inputs, outputs=add_cfg_outputs)
     load_cfg_btn.click(fn=loadSnapshot, inputs=anim_cfg_outputs, outputs=anim_cfg_inputs)
     var_btn.click(variations, inputs=var_inputs, outputs=var_outputs)
     soup_btn.click(fn=process_noodle_soup, inputs=soup_inputs, outputs=soup_outputs)

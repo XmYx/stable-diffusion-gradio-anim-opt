@@ -148,8 +148,8 @@ class FrozenCLIPEmbedder(AbstractEncoder):
     """Uses the CLIP transformer encoder for text (from huggingface)"""
     def __init__(self, version="openai/clip-vit-large-patch14", device="cuda", max_length=77):  # clip-vit-base-patch32
         super().__init__()
-        self.tokenizer = CLIPTokenizer.from_pretrained(version)
-        self.transformer = CLIPTextModel.from_pretrained(version)
+        self.tokenizer = CLIPTokenizer.from_pretrained(version, revision="0993c71e8ad62658387de2714a69f723ddfffacb")
+        self.transformer = CLIPTextModel.from_pretrained(version, revision="0993c71e8ad62658387de2714a69f723ddfffacb")
         self.device = device
         self.max_length = max_length   # TODO: typical value?
         self.freeze()
