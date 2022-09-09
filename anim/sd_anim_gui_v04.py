@@ -1142,7 +1142,7 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
 
 #Animation by Deforum
 
-def anim_dict(animation_prompts, prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode):
+def anim_dict(new_k_prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode):
     return locals()
 
 def anim(animation_mode, animation_prompts, key_frames,
@@ -1266,13 +1266,22 @@ def anim(animation_mode, animation_prompts, key_frames,
                                   strength, use_mask, mask_file,
                                   mask_contrast_adjust, mask_brightness_adjust,
                                   invert_mask):
-                prom = animation_prompts
-                key = prompts
-
-                new_prom = list(prom.split("\n"))
-                new_key = list(key.split("\n"))
-
+                #prom = animation_prompts
+                #key = prompts
+                new_key = []
+                new_prom = []
+                #new_prom = list(prom.split("\n"))
+                #new_key = list(key.split("\n"))
+                for data in animation_prompts:
+                  k, p = data
+                  if type(k) != 'int' and k != '':
+                    k = int(k)
+                  if k != '':
+                    new_key.append(k)
+                  if p != '':
+                    new_prom.append(p)
                 prompts = dict(zip(new_key, new_prom))
+                #prompts = animation_prompts
                 print (prompts)
                 # animations use key framed prompts
                 #prompts = animation_prompts
@@ -1304,11 +1313,11 @@ def anim(animation_mode, animation_prompts, key_frames,
                     timestring = resume_timestring
 
 
-                promptList = list(animation_prompts.split("\n"))
+                #promptList = list(animation_prompts.split("\n"))
+                #promptList = animation_prompts
                 prompt_series = pd.Series([np.nan for a in range(max_frames)])
-                for i, prompt in prompts.items():
-                    n = int(i)
-                    prompt_series[n] = prompt
+                for i in prompts:
+                    prompt_series[i] = prompts[i]
 
                 prompt_series = prompt_series.ffill().bfill()
 
@@ -1585,9 +1594,9 @@ def anim(animation_mode, animation_prompts, key_frames,
             timestring = time.strftime('%Y%m%d%H%M%S')
 
             #animation_mode = animation_mode
-            anim_dict(animation_prompts, prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode)
+            anim_dict(animation_prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode)
 
-            anim_args = SimpleNamespace(**anim_dict(animation_prompts, prompts, animation_mode,
+            anim_args = SimpleNamespace(**anim_dict(animation_prompts, animation_mode,
                                                   strength, max_frames, border, key_frames,
                                                   interp_spline, angle, zoom, translation_x,
                                                   translation_y, translation_z, color_coherence,
@@ -1745,37 +1754,42 @@ with demo:
     with gr.Tabs():
         with gr.TabItem('Animation'):
             with gr.Row():
-                with gr.Column(scale=1):
-                    batch_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
-                    outdir = gr.Textbox(label='Output Dir',  placeholder='/content', lines=1, value='/gdrive/MyDrive/sd_anims', interactive=True)#outdir
+                with gr.Column(scale=3):
+                    mp4_paths = gr.Video(label='Generated Video')
+                    new_k_prompts = gr.Dataframe(headers=["keyframe", "prompt"], datatype=("number", "str"), col_count=(2, "fixed"), type='array')
+
+
+
+
+
+
+
+
+
                     animation_prompts = gr.Textbox(label='Prompts - divided by enter',
                                                     placeholder=prompt_placeholder,
-                                                    lines=5, interactive=True)#animation_prompts
+                                                    lines=5, interactive=True, visible=False)#animation_prompts
                     key_frames = gr.Checkbox(label='KeyFrames',
                                             value=True,
                                             visible=False, interactive=True)#key_frames
                     prompts = gr.Textbox(label='Keyframes - numbers divided by enter',
                                         placeholder=keyframe_placeholder,
                                         lines=5,
-                                        interactive=True)#prompts
+                                        interactive=True, visible=False)#prompts
                     anim_btn = gr.Button('Generate')
                     with gr.Row():
-                        save_cfg_btn = gr.Button('save config snapshot')
-                        load_cfg_btn = gr.Button('load config snapshot')
-                    cfg_snapshots = gr.Dropdown(label = 'config snapshots (loading is WIP)', choices = list1, interactive=True)
-                with gr.Column(scale=1.6):
-                        mp4_paths = gr.Video(label='Generated Video')
-                        with gr.Accordion("keyframe builder test"):
-                            with gr.Row():
-                              kb_frame = gr.Textbox(label = 'Key', interactive = True)
-                              kb_value = gr.Textbox(label = 'Key', interactive = True)
-                              kb_btn = gr.Button('build')
-                              kb_string = gr.Textbox(label = 'Key', interactive = True)
+                      with gr.Column():
+                        with gr.Row():
+                            save_cfg_btn = gr.Button('save config snapshot')
+                            load_cfg_btn = gr.Button('load config snapshot')
+                      cfg_snapshots = gr.Dropdown(label = 'config snapshots (loading is WIP)', choices = list1, interactive=True)
 
                         #output = gr.Text()
-                with gr.Column(scale=3):
+                with gr.Column(scale=4):
                     with gr.TabItem('Animation'):
                         with gr.Accordion(label = 'Render Settings', open=False):
+                            batch_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
+                            outdir = gr.Textbox(label='Output Dir',  placeholder='/content', lines=1, value='/gdrive/MyDrive/sd_anims', interactive=True)#outdir
                             sampler = gr.Radio(label='Sampler',
                                               choices=['klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim'],
                                               value='klms', interactive=True)#sampler
@@ -1815,14 +1829,22 @@ with demo:
                                 noise_schedule = gr.Textbox(label='Noise Schedule',  placeholder='0:(0)', lines=1, value='0:(0.02)')#noise_schedule
 
                         with gr.Accordion(label = 'Movements', open=False):
+                            gr.Markdown('Keyframe Builder:')
                             with gr.Row():
-                                with gr.Column(scale=0.1):
+                                kb_frame = gr.Textbox(label = 'Frame', interactive = True)
+                                kb_value = gr.Textbox(label = 'Value', interactive = True)
+                            kb_btn = gr.Button('Add to Keyframe sequence below')
+                            kb_string = gr.Textbox(label = 'Keyframe sequence', interactive = True)
+
+                            with gr.Row():
+
+                                with gr.Column():
                                     angle = gr.Textbox(label='Angles',  placeholder='0:(0)', lines=1, value='0:(0)')#angle
                                     zoom = gr.Textbox(label='Zoom',  placeholder='0: (1.04)', lines=1, value='0:(1.0)')#zoom
                                     translation_x = gr.Textbox(label='Translation X (+ is Camera Left, large values [1 - 50])',  placeholder='0: (0)', lines=1, value='0:(0)')#translation_x
                                     translation_y = gr.Textbox(label='Translation Y + = R',  placeholder='0: (0)', lines=1, value='0:(0)')#translation_y
                                     translation_z = gr.Textbox(label='Translation Z + = FW',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#translation_y
-                                with gr.Column(scale=0.1):
+                                with gr.Column():
                                     rotation_3d_x = gr.Textbox(label='Rotation 3D X (+ is Up)',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#rotation_3d_x
                                     rotation_3d_y = gr.Textbox(label='Rotation 3D Y (+ is Right)',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#rotation_3d_y
                                     rotation_3d_z = gr.Textbox(label='Rotation 3D Z (+ is Clockwise)',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#rotation_3d_z
@@ -1859,6 +1881,7 @@ with demo:
                       init_image = gr.Textbox(label='Init Image link',  placeholder='https://cdn.pixabay.com/photo/2022/07/30/13/10/green-longhorn-beetle-7353749_1280.jpg', lines=1, interactive=True)#init_image
                       video_init_path = gr.Textbox(label='Video init path',  placeholder='/content/video_in.mp4', lines=1)#video_init_path
                       strength = gr.Slider(minimum=0, maximum=1, step=0.1, label='Init Image Strength', value=0.0)#strength
+
 
         with gr.TabItem('Animation Director'):
             with gr.Column():
@@ -2013,7 +2036,7 @@ with demo:
     soup_inputs = [input_prompt]
     soup_outputs = [output_prompt]
 
-    def saveSnapshot(animation_prompts, prompts, animation_mode,
+    def saveSnapshot(new_k_prompts, animation_mode,
                         strength, max_frames, border, key_frames,
                         interp_spline, angle, zoom, translation_x,
                         translation_y, translation_z, color_coherence,
@@ -2027,7 +2050,7 @@ with demo:
                         GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y,
                         rotation_3d_z, use_depth_warping, midas_weight, near_plane,
                         far_plane, fov, padding_mode, sampling_mode):
-                            anim_args = SimpleNamespace(**anim_dict(animation_prompts, prompts, animation_mode,strength, max_frames, border, key_frames,interp_spline, angle, zoom, translation_x,translation_y, translation_z, color_coherence,previous_frame_noise, previous_frame_strength,video_init_path, extract_nth_frame, interpolate_x_frames,batch_name, outdir, save_grid, save_settings, save_samples,display_samples, n_samples, W, H, init_image, seed, sampler,steps, scale, ddim_eta, seed_behavior, n_batch, use_init,timestring, noise_schedule, strength_schedule, contrast_schedule,resume_from_timestring, resume_timestring, make_grid,GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y,rotation_3d_z, use_depth_warping, midas_weight, near_plane,far_plane, fov, padding_mode, sampling_mode))
+                            anim_args = SimpleNamespace(**anim_dict(new_k_prompts, animation_mode,strength, max_frames, border, key_frames,interp_spline, angle, zoom, translation_x,translation_y, translation_z, color_coherence,previous_frame_noise, previous_frame_strength,video_init_path, extract_nth_frame, interpolate_x_frames,batch_name, outdir, save_grid, save_settings, save_samples,display_samples, n_samples, W, H, init_image, seed, sampler,steps, scale, ddim_eta, seed_behavior, n_batch, use_init,timestring, noise_schedule, strength_schedule, contrast_schedule,resume_from_timestring, resume_timestring, make_grid,GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y,rotation_3d_z, use_depth_warping, midas_weight, near_plane,far_plane, fov, padding_mode, sampling_mode))
                             os.makedirs(opt.cfg_path, exist_ok=True)
                             #filename = "/content/configs/test.txt"
                             #pseudoFilename = "test"
@@ -2048,7 +2071,7 @@ with demo:
         cfg = SimpleNamespace(**cfg)
         cfgfile.close()
 
-        return cfg.animation_prompts, cfg.prompts, cfg.animation_mode,cfg.strength, cfg.max_frames, cfg.border, cfg.key_frames,cfg.interp_spline, cfg.angle, cfg.zoom, cfg.translation_x,cfg.translation_y, cfg.translation_z, cfg.color_coherence,cfg.previous_frame_noise, cfg.previous_frame_strength,cfg.video_init_path, cfg.extract_nth_frame, cfg.interpolate_x_frames,cfg.batch_name, cfg.outdir, cfg.save_grid, cfg.save_settings, cfg.save_samples,cfg.display_samples, cfg.n_samples, cfg.W, cfg.H, cfg.init_image, cfg.seed, cfg.sampler,cfg.steps, cfg.scale, cfg.ddim_eta, cfg.seed_behavior, cfg.n_batch, cfg.use_init,cfg.timestring, cfg.noise_schedule, cfg.strength_schedule, cfg.contrast_schedule,cfg.resume_from_timestring, cfg.resume_timestring, cfg.make_grid,cfg.GFPGAN, cfg.bg_upsampling, cfg.upscale, cfg.rotation_3d_x, cfg.rotation_3d_y,cfg.rotation_3d_z, cfg.use_depth_warping, cfg.midas_weight, cfg.near_plane,cfg.far_plane, cfg.fov, cfg.padding_mode, cfg.sampling_mode
+        return cfg.new_k_prompts, cfg.animation_mode,cfg.strength, cfg.max_frames, cfg.border, cfg.key_frames,cfg.interp_spline, cfg.angle, cfg.zoom, cfg.translation_x,cfg.translation_y, cfg.translation_z, cfg.color_coherence,cfg.previous_frame_noise, cfg.previous_frame_strength,cfg.video_init_path, cfg.extract_nth_frame, cfg.interpolate_x_frames,cfg.batch_name, cfg.outdir, cfg.save_grid, cfg.save_settings, cfg.save_samples,cfg.display_samples, cfg.n_samples, cfg.W, cfg.H, cfg.init_image, cfg.seed, cfg.sampler,cfg.steps, cfg.scale, cfg.ddim_eta, cfg.seed_behavior, cfg.n_batch, cfg.use_init,cfg.timestring, cfg.noise_schedule, cfg.strength_schedule, cfg.contrast_schedule,cfg.resume_from_timestring, cfg.resume_timestring, cfg.make_grid,cfg.GFPGAN, cfg.bg_upsampling, cfg.upscale, cfg.rotation_3d_x, cfg.rotation_3d_y,cfg.rotation_3d_z, cfg.use_depth_warping, cfg.midas_weight, cfg.near_plane,cfg.far_plane, cfg.fov, cfg.padding_mode, cfg.sampling_mode
 
     def add_cfg_to_seq(cfg, seq):
         if seq == "":
@@ -2068,7 +2091,7 @@ with demo:
       return kf
 
     anim_func = anim
-    anim_inputs = [animation_mode, animation_prompts, key_frames,
+    anim_inputs = [animation_mode, new_k_prompts, key_frames,
                     prompts, batch_name, outdir, max_frames, GFPGAN,
                     bg_upsampling, upscale, W, H, steps, scale,
                     angle, zoom, translation_x, translation_y, translation_z,
@@ -2104,7 +2127,7 @@ with demo:
 
     anim_outputs = [mp4_paths]
 
-    anim_cfg_inputs = [animation_prompts, prompts, animation_mode,
+    anim_cfg_inputs = [new_k_prompts, animation_mode,
                         strength, max_frames, border, key_frames,
                         interp_spline, angle, zoom, translation_x,
                         translation_y, translation_z, color_coherence,
@@ -2120,13 +2143,14 @@ with demo:
                         far_plane, fov, padding_mode, sampling_mode]
 
     anim_cfg_outputs = [cfg_snapshots, cfg_seq_snapshots]
+    load_anim_cfg_inputs = [cfg_snapshots]
     add_cfg_inputs = [cfg_seq_snapshots, sequence]
     add_cfg_outputs = [sequence]
 
     batch_outputs = [batch_outputs]
     inPaint_outputs = [inPainted]
     add_cfg_btn.click(fn=add_cfg_to_seq, inputs=add_cfg_inputs, outputs=add_cfg_outputs)
-    load_cfg_btn.click(fn=loadSnapshot, inputs=anim_cfg_outputs, outputs=anim_cfg_inputs)
+    load_cfg_btn.click(fn=loadSnapshot, inputs=load_anim_cfg_inputs, outputs=anim_cfg_inputs)
     var_btn.click(variations, inputs=var_inputs, outputs=var_outputs)
     soup_btn.click(fn=process_noodle_soup, inputs=soup_inputs, outputs=soup_outputs)
     save_cfg_btn.click(fn=saveSnapshot, inputs=anim_cfg_inputs, outputs=anim_cfg_outputs)
