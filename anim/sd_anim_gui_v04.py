@@ -1676,6 +1676,8 @@ inPaint=None
 cfg_snapshots = []
 demo = gr.Blocks()
 
+
+
 soup_help1 = """
   ##                     Adjective Types\n
   * _adj-architecture_ - A list of architectural adjectives and styles
@@ -1730,10 +1732,13 @@ soup_help2 ="""
   """
 
 list1 = []
-os.makedirs('/gdrive/MyDrive/sd_anim/configs/', exist_ok=True)
-for files in os.listdir('/gdrive/MyDrive/sd_anim/configs/'):
+if opt.cfg_path == "" or opt.cfg_path == None:
+  opt.cfg_path = "/gdrive/MyDrive/sd_anim_configs"
+os.makedirs(opt.cfg_path, exist_ok=True)
+for files in os.listdir(opt.cfg_path):
     if files.endswith(".txt"):
         list1.append(files)
+list2 = list1
 with demo:
     with gr.Tabs():
         with gr.TabItem('Animation'):
@@ -1766,7 +1771,7 @@ with demo:
                               kb_string = gr.Textbox(label = 'Key', interactive = True)
 
                         #output = gr.Text()
-                with gr.Column(scale=2.5):
+                with gr.Column(scale=3):
                     with gr.TabItem('Animation'):
                         with gr.Accordion(label = 'Render Settings', open=False):
                             sampler = gr.Radio(label='Sampler',
@@ -1775,53 +1780,59 @@ with demo:
                             max_frames = gr.Slider(minimum=1, maximum=2500, step=1, label='Frames to render', value=20)#max_frames
                             steps = gr.Slider(minimum=1, maximum=300, step=1, label='Steps', value=20, interactive=True)#steps
                             scale = gr.Slider(minimum=1, maximum=25, step=1, label='Scale', value=11, interactive=True)#scale
-                            W = gr.Slider(minimum=256, maximum=8192, step=64, label='Width', value=512, interactive=True)#width
-                            H = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)#height
+                            ddim_eta = gr.Slider(minimum=0, maximum=1.0, step=0.1, label='DDIM ETA', value=0.0)#ddim_eta
                             with gr.Row():
+                                W = gr.Slider(minimum=256, maximum=8192, step=64, label='Width', value=512, interactive=True)#width
+                                H = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)#height
+                            with gr.Row():
+
                                 GFPGAN = gr.Checkbox(label='GFPGAN, Upscaler', value=False)
                                 bg_upsampling = gr.Checkbox(label='BG Enhancement', value=False)
-                            upscale = gr.Slider(minimum=1, maximum=8, step=1, label='Upscaler, 1 to turn off', value=1, interactive=True)
+                                upscale = gr.Slider(minimum=1, maximum=8, step=1, label='Upscaler, 1 to turn off', value=1, interactive=True)
 
 
                             n_batch = gr.Slider(minimum=1, maximum=25, step=1, label='Number of Batches', value=1, visible=False)#n_batch
                             n_samples = gr.Slider(minimum=1, maximum=4, step=1, label='Samples (keep on 1)', value=1, visible=False)#n_samples
-                            ddim_eta = gr.Slider(minimum=0, maximum=1.0, step=0.1, label='DDIM ETA', value=0.0)#ddim_eta
                             resume_timestring = gr.Textbox(label='Resume from:',  placeholder='20220829210106', lines=1, value='', interactive = True)
                             timestring = gr.Textbox(label='Timestring',  placeholder='timestring', lines=1, value='')#timestring
                         with gr.Accordion(label = 'Animation Settings', open=False):
-                            animation_mode = gr.Dropdown(label='Animation Mode',
-                                                            choices=['None', '2D', '3D', 'Video Input', 'Interpolation'],
-                                                            value='3D')#animation_mode
+                            with gr.Row():
+                                border = gr.Dropdown(label='Border', choices=['wrap', 'replicate'], value='wrap')#border
+                                animation_mode = gr.Dropdown(label='Animation Mode',
+                                                                choices=['None', '2D', '3D', 'Video Input', 'Interpolation'],
+                                                                value='3D')#animation_mode
                             with gr.Row():
                                 seed_behavior = gr.Dropdown(label='Seed Behavior', choices=['iter', 'fixed', 'random'], value='iter')#seed_behavior
                                 seed = gr.Number(label='Seed',  placeholder='SEED HERE', value='-1')#seed
                             with gr.Row():
                                 interp_spline = gr.Dropdown(label='Spline Interpolation', choices=['Linear', 'Quadratic', 'Cubic'], value='Linear')#interp_spline
                                 color_coherence = gr.Dropdown(label='Color Coherence', choices=['None', 'Match Frame 0 HSV', 'Match Frame 0 LAB', 'Match Frame 0 RGB'], value='Match Frame 0 RGB')#color_coherence
-                            noise_schedule = gr.Textbox(label='Noise Schedule',  placeholder='0:(0)', lines=1, value='0:(0.02)')#noise_schedule
                             strength_schedule = gr.Textbox(label='Strength_Schedule',  placeholder='0:(0)', lines=1, value='0:(0.65)')#strength_schedule
-                            contrast_schedule = gr.Textbox(label='Contrast Schedule',  placeholder='0:(0)', lines=1, value='0:(1.0)')#contrast_schedule
-                            border = gr.Dropdown(label='Border', choices=['wrap', 'replicate'], value='wrap')#border
+                            with gr.Row():
+                                contrast_schedule = gr.Textbox(label='Contrast Schedule',  placeholder='0:(0)', lines=1, value='0:(1.0)')#contrast_schedule
+                                noise_schedule = gr.Textbox(label='Noise Schedule',  placeholder='0:(0)', lines=1, value='0:(0.02)')#noise_schedule
 
                         with gr.Accordion(label = 'Movements', open=False):
-                            with gr.Column(scale=0.13):
-                                angle = gr.Textbox(label='Angles',  placeholder='0:(0)', lines=1, value='0:(0)')#angle
-                                zoom = gr.Textbox(label='Zoom',  placeholder='0: (1.04)', lines=1, value='0:(1.0)')#zoom
-                                translation_x = gr.Textbox(label='Translation X (+ is Camera Left, large values [1 - 50])',  placeholder='0: (0)', lines=1, value='0:(0)')#translation_x
-                                translation_y = gr.Textbox(label='Translation Y + = R',  placeholder='0: (0)', lines=1, value='0:(0)')#translation_y
-                                translation_z = gr.Textbox(label='Translation Z + = FW',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#translation_y
-                            with gr.Column(scale=0.13):
-                                rotation_3d_x = gr.Textbox(label='Rotation 3D X (+ is Up)',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#rotation_3d_x
-                                rotation_3d_y = gr.Textbox(label='Rotation 3D Y (+ is Right)',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#rotation_3d_y
-                                rotation_3d_z = gr.Textbox(label='Rotation 3D Z (+ is Clockwise)',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#rotation_3d_z
-                                midas_weight = gr.Slider(minimum=0, maximum=5, step=0.1, label='Midas Weight', value=0.3, visible=True)#midas_weight
+                            with gr.Row():
+                                with gr.Column(scale=0.1):
+                                    angle = gr.Textbox(label='Angles',  placeholder='0:(0)', lines=1, value='0:(0)')#angle
+                                    zoom = gr.Textbox(label='Zoom',  placeholder='0: (1.04)', lines=1, value='0:(1.0)')#zoom
+                                    translation_x = gr.Textbox(label='Translation X (+ is Camera Left, large values [1 - 50])',  placeholder='0: (0)', lines=1, value='0:(0)')#translation_x
+                                    translation_y = gr.Textbox(label='Translation Y + = R',  placeholder='0: (0)', lines=1, value='0:(0)')#translation_y
+                                    translation_z = gr.Textbox(label='Translation Z + = FW',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#translation_y
+                                with gr.Column(scale=0.1):
+                                    rotation_3d_x = gr.Textbox(label='Rotation 3D X (+ is Up)',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#rotation_3d_x
+                                    rotation_3d_y = gr.Textbox(label='Rotation 3D Y (+ is Right)',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#rotation_3d_y
+                                    rotation_3d_z = gr.Textbox(label='Rotation 3D Z (+ is Clockwise)',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#rotation_3d_z
+                                    midas_weight = gr.Slider(minimum=0, maximum=5, step=0.1, label='Midas Weight', value=0.3, visible=True)#midas_weight
                         with gr.Accordion('3D Settings', open=False):
                             use_depth_warping = gr.Checkbox(label='Depth Warping', value=True, visible=True)#use_depth_warping
                             near_plane = gr.Slider(minimum=0, maximum=2000, step=1, label='Near Plane', value=200, visible=True)#near_plane
                             far_plane = gr.Slider(minimum=0, maximum=2000, step=1, label='Far Plane', value=1000, visible=True)#far_plane
                             fov = gr.Slider(minimum=0, maximum=360, step=1, label='FOV', value=40, visible=True)#fov
-                            padding_mode = gr.Dropdown(label='Padding Mode', choices=['border', 'reflection', 'zeros'], value='border', visible=True)#padding_mode
-                            sampling_mode = gr.Dropdown(label='Sampling Mode', choices=['bicubic', 'bilinear', 'nearest'], value='bicubic', visible=True)#sampling_mode
+                            with gr.Row():
+                                padding_mode = gr.Dropdown(label='Padding Mode', choices=['border', 'reflection', 'zeros'], value='border', visible=True)#padding_mode
+                                sampling_mode = gr.Dropdown(label='Sampling Mode', choices=['bicubic', 'bilinear', 'nearest'], value='bicubic', visible=True)#sampling_mode
 
                         with gr.Accordion(label = 'Other Settings', open=False):
                             with gr.Row():
@@ -1850,7 +1861,7 @@ with demo:
         with gr.TabItem('Animation Director'):
             with gr.Column():
                 add_cfg_btn = gr.Button('add config snapshot to sequence')
-                cfg_seq_snapshots = gr.Dropdown(label = 'select snapshot to add', choices = list1, interactive=True)
+                cfg_seq_snapshots = gr.Dropdown(label = 'select snapshot to add', choices = list2, interactive=True)
             with gr.Column():
                 sequence = gr.Textbox(label='sequence', lines = 10, interactive=True)
 
@@ -2015,17 +2026,18 @@ with demo:
                         rotation_3d_z, use_depth_warping, midas_weight, near_plane,
                         far_plane, fov, padding_mode, sampling_mode):
                             anim_args = SimpleNamespace(**anim_dict(animation_prompts, prompts, animation_mode,strength, max_frames, border, key_frames,interp_spline, angle, zoom, translation_x,translation_y, translation_z, color_coherence,previous_frame_noise, previous_frame_strength,video_init_path, extract_nth_frame, interpolate_x_frames,batch_name, outdir, save_grid, save_settings, save_samples,display_samples, n_samples, W, H, init_image, seed, sampler,steps, scale, ddim_eta, seed_behavior, n_batch, use_init,timestring, noise_schedule, strength_schedule, contrast_schedule,resume_from_timestring, resume_timestring, make_grid,GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y,rotation_3d_z, use_depth_warping, midas_weight, near_plane,far_plane, fov, padding_mode, sampling_mode))
-                            os.makedirs('{opt.cfg_path}', exist_ok=True)
+                            os.makedirs(opt.cfg_path, exist_ok=True)
                             #filename = "/content/configs/test.txt"
                             #pseudoFilename = "test"
                             filename = f'{opt.cfg_path}/{batch_name}_{random.randint(10000, 99999)}_settings_snapshot.txt'
                             with open(filename, "w+", encoding="utf-8") as f:
                                 json.dump(dict(anim_args.__dict__), f, ensure_ascii=False, indent=4)
                             list1 = []
-                            for files in os.listdir('{opt.cfg_path}'):
+                            for files in os.listdir(opt.cfg_path):
                                 if files.endswith(".txt"):
                                     list1.append(files)
-                            return gr.Dropdown.update(choices=list1), gr.Dropdown.update(choices=list1)
+                            list2 = list1
+                            return gr.Dropdown.update(choices=list1), gr.Dropdown.update(choices=list2)
 
     def loadSnapshot(snapshotFile):
         path = f'{opt.cfg_path}/{snapshotFile}'
@@ -2068,7 +2080,6 @@ with demo:
                     use_init, init_image, strength, timestring,
                     resume_from_timestring, resume_timestring, make_grid, b_init_img_array, b_use_mask,
                     b_mask_file, b_invert_mask, b_mask_brightness_adjust, b_mask_contrast_adjust]
-    anim_cfg_inputs = []
 
     batch_inputs = [b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
                     b_upscale, b_W, b_H, b_steps, b_scale, b_seed_behavior,
