@@ -1745,7 +1745,7 @@ with demo:
                                         value='0', interactive=True)#prompts
                     anim_btn = gr.Button('Generate')
                     save_cfg_btn = gr.Button('save config snapshot')
-                    cfg_snapshots = gr.Dropdown(label = 'config snapshots (loading is WIP)' choices = list1, interactive=True)
+                    cfg_snapshots = gr.Dropdown(label = 'config snapshots (loading is WIP)', choices = list1, interactive=True)
                 with gr.Column(scale=1.6):
                         mp4_paths = gr.Video(label='Generated Video')
                         with gr.Accordion("keyframe builder test"):
