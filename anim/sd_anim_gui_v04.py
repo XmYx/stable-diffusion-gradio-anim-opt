@@ -1877,87 +1877,88 @@ def anim(animation_mode, animation_prompts, key_frames,
                     #load_depth_model()
                 else:
                     adabins_helper, midas_model, midas_transform = None, None, None
-
+                opt.should_stop = False
                 n_samples = 1
                 prev_sample = None
                 color_match_sample = None
                 for frame_idx in range(start_frame,max_frames):
-                    print(f"Rendering animation frame {frame_idx} of {max_frames}")
-                    noise = noise_schedule_series[frame_idx]
-                    strength = strength_schedule_series[frame_idx]
-                    contrast = contrast_schedule_series[frame_idx]
-                    if frame_idx == 0:
-                        strength = 0
-                    # resume animation
-                    if resume_from_timestring:
-                        path = os.path.join(outdir,f"{timestring}_{frame_idx-1:05}.png")
-                        img = cv2.imread(path)
-                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                        prev_sample = sample_from_cv2(img)
+                    if opt.should_stop != True:
+                        print(f"Rendering animation frame {frame_idx} of {max_frames}")
+                        noise = noise_schedule_series[frame_idx]
+                        strength = strength_schedule_series[frame_idx]
+                        contrast = contrast_schedule_series[frame_idx]
+                        if frame_idx == 0:
+                            strength = 0
+                        # resume animation
+                        if resume_from_timestring:
+                            path = os.path.join(outdir,f"{timestring}_{frame_idx-1:05}.png")
+                            img = cv2.imread(path)
+                            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                            prev_sample = sample_from_cv2(img)
 
-                    # apply transforms to previous frame
-                    if prev_sample is not None:
+                        # apply transforms to previous frame
+                        if prev_sample is not None:
 
-                        if animation_mode == '2D':
-                            prev_img = anim_frame_warp_2d(sample_to_cv2(prev_sample), angle_series, zoom_series, translation_x_series, translation_y_series, frame_idx)
-                        else: # '3D'
-                            prev_img = anim_frame_warp_3d(sample_to_cv2(prev_sample), translation_x_series, translation_y_series, translation_z_series, rotation_3d_x_series, rotation_3d_y_series, rotation_3d_z_series, frame_idx, adabins_helper, midas_model, mtransform)
+                            if animation_mode == '2D':
+                                prev_img = anim_frame_warp_2d(sample_to_cv2(prev_sample), angle_series, zoom_series, translation_x_series, translation_y_series, frame_idx)
+                            else: # '3D'
+                                prev_img = anim_frame_warp_3d(sample_to_cv2(prev_sample), translation_x_series, translation_y_series, translation_z_series, rotation_3d_x_series, rotation_3d_y_series, rotation_3d_z_series, frame_idx, adabins_helper, midas_model, mtransform)
 
-                        # apply color matching
-                        if color_coherence != 'None':
-                            if color_match_sample is None:
-                                color_match_sample = prev_img.copy()
+                            # apply color matching
+                            if color_coherence != 'None':
+                                if color_match_sample is None:
+                                    color_match_sample = prev_img.copy()
+                                else:
+                                    prev_img = maintain_colors(prev_img, color_match_sample, color_coherence)
+
+                            # apply scaling
+                            contrast_sample = prev_img * contrast
+                            # apply frame noising
+                            noised_sample = add_noise(sample_from_cv2(contrast_sample), noise)
+
+                            # use transformed previous frame as init for current
+                            use_init = True
+                            #init_sample = noised_sample.half().to(device)
+                            if half_precision:
+                                init_sample = noised_sample.half().to(device)
                             else:
-                                prev_img = maintain_colors(prev_img, color_match_sample, color_coherence)
+                                init_sample = noised_sample.to(device)
+                            strength = max(0.0, min(1.0, strength))
 
-                        # apply scaling
-                        contrast_sample = prev_img * contrast
-                        # apply frame noising
-                        noised_sample = add_noise(sample_from_cv2(contrast_sample), noise)
+                        # grab prompt for current frame
+                        prompt = prompt_series[frame_idx]
+                        print(f"{prompt} {seed}")
 
-                        # use transformed previous frame as init for current
-                        use_init = True
-                        #init_sample = noised_sample.half().to(device)
-                        if half_precision:
-                            init_sample = noised_sample.half().to(device)
-                        else:
-                            init_sample = noised_sample.to(device)
-                        strength = max(0.0, min(1.0, strength))
-
-                    # grab prompt for current frame
-                    prompt = prompt_series[frame_idx]
-                    print(f"{prompt} {seed}")
-
-                    # grab init image for current frame
-                    if using_vid_init:
-                        init_frame = os.path.join(outdir, 'inputframes', f"{frame_idx+1:04}.jpg")
-                        print(f"Using video init frame {init_frame}")
-                        init_image = init_frame
-                    # sample the diffusion model
-                    results = generate(prompt, batch_name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, scale, seed, sampler, n_batch, n_samples, ddim_eta, use_init, init_image, init_sample, strength, use_mask, mask_file, mask_contrast_adjust, mask_brightness_adjust, invert_mask, dynamic_threshold, static_threshold, C, f, init_c, return_latent=False, return_sample=True)
+                        # grab init image for current frame
+                        if using_vid_init:
+                            init_frame = os.path.join(outdir, 'inputframes', f"{frame_idx+1:04}.jpg")
+                            print(f"Using video init frame {init_frame}")
+                            init_image = init_frame
+                        # sample the diffusion model
+                        results = generate(prompt, batch_name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, scale, seed, sampler, n_batch, n_samples, ddim_eta, use_init, init_image, init_sample, strength, use_mask, mask_file, mask_contrast_adjust, mask_brightness_adjust, invert_mask, dynamic_threshold, static_threshold, C, f, init_c, return_latent=False, return_sample=True)
 
 
 
 
 
-                    sample, image = results[0], results[1]
+                        sample, image = results[0], results[1]
 
 
-                    filename = f"{timestring}_{frame_idx:05}.png"
-                    image.save(os.path.join(outdir, filename))
-                    if not using_vid_init:
-                        prev_sample = sample
+                        filename = f"{timestring}_{frame_idx:05}.png"
+                        image.save(os.path.join(outdir, filename))
+                        if not using_vid_init:
+                            prev_sample = sample
 
-                    seed = next_seed(seed, seed_behavior)
+                        seed = next_seed(seed, seed_behavior)
 
-                    path_to_yield = f"{outdir}/{filename}"
+                        path_to_yield = f"{outdir}/{filename}"
 
-                    img = image
-                    print(f'Yielding type: {type(img)}')
-                    print(f'Yielding: {img}')
-                    mp4_path = ""
-                    mp4_pathlist = []
-                    yield gr.update(visible=True, value=img), gr.update(visible=False), gr.update(visible=False)
+                        img = image
+                        print(f'Yielding type: {type(img)}')
+                        print(f'Yielding: {img}')
+                        mp4_path = ""
+                        mp4_pathlist = []
+                        yield gr.update(visible=True, value=img), gr.update(visible=False), gr.update(visible=False)
 
 
 
@@ -2097,6 +2098,10 @@ for files in os.listdir(opt.cfg_path):
         list1.append(files)
 list2 = list1
 
+def stop():
+    opt.should_stop = True
+    return
+
 def test_update(scale):
   for _ in range(10):
         time.sleep(1)
@@ -2109,6 +2114,7 @@ with demo:
         with gr.TabItem('Animation'):
             with gr.Row():
                 with gr.Column(scale=3):
+                    #stop_btn = gr.Button('stop')
                     img = gr.Image(visible=False)
                     mp4_path_to_view = gr.Dropdown(label='videos', choices=mp4_pathlist)
                     mp4_paths = gr.Video(label='Generated Video')
@@ -2581,10 +2587,10 @@ class ServerLauncher(threading.Thread):
             'server_port': 7860,
             'share': True,
             'show_error': True,
-            'debug': True
+            'debug': False
         }
         #if not opt.share:
-        demo.queue(concurrency_count=3)
+        demo.queue(concurrency_count=5, max_size=5, status_update_rate=1)
         #if opt.share and opt.share_password:
         #    gradio_params['auth'] = ('webui', opt.share_password)
 
