@@ -1957,7 +1957,7 @@ def anim(animation_mode, animation_prompts, key_frames,
                     print(f'Yielding: {img}')
                     mp4_path = ""
                     mp4_pathlist = []
-                    yield img, gr.update(visible=False), gr.update(visible=False)
+                    yield gr.update(visible=True, value=img), gr.update(visible=False), gr.update(visible=False)
 
 
 
@@ -1970,7 +1970,7 @@ def anim(animation_mode, animation_prompts, key_frames,
 
                 torch_gc()
                 if mp4_path == '':
-                    yield img, gr.update(visible=False, value=mp4_path), gr.Dropdown.update(visible=False, choices=mp4_pathlist)
+                    yield gr.update(visible=True, value=img), gr.update(visible=False, value=mp4_path), gr.Dropdown.update(visible=False, choices=mp4_pathlist)
                 else:
                     yield gr.update(visible=False), gr.update(visible=True, value=mp4_path), gr.Dropdown.update(visible=True, choices=mp4_pathlist)
                 #return mp4_path, gr.Dropdown.update(choices=mp4_pathlist)
