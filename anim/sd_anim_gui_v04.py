@@ -42,7 +42,7 @@ parser.add_argument("--var_ckpt", type=str, help="Variations Model Path", defaul
 parser.add_argument("--cfg_path", type=str, help="Config Snapshots Path", default=None)
 parser.add_argument("--outdir", type=str, help="Config Snapshots Path", default=None)
 parser.add_argument("--token", type=str, help="Config Snapshots Path", default=None)
-parser.add_argument("--load_p2p", type=str, help="Config Snapshots Path", default=None)
+parser.add_argument("--load_p2p", type=bool, help="Config Snapshots Path", default=None)
 
 opt = parser.parse_args()
 
@@ -73,7 +73,6 @@ from diffusers import LMSDiscreteScheduler
 import nsp_pantry
 from nsp_pantry import nspterminology, nsp_parse
 
-
 if opt.load_p2p == True:
     model_path_clip = "openai/clip-vit-large-patch14"
     clip_tokenizer = CLIPTokenizer.from_pretrained(model_path_clip)
@@ -82,7 +81,7 @@ if opt.load_p2p == True:
     model_path_diffusion = "CompVis/stable-diffusion-v1-4"
     unet = UNet2DConditionModel.from_pretrained(model_path_diffusion, subfolder="unet", use_auth_token=opt.token, revision="fp16", torch_dtype=torch.float16)
     vae = AutoencoderKL.from_pretrained(model_path_diffusion, subfolder="vae", use_auth_token=opt.token, revision="fp16", torch_dtype=torch.float16)
-
+    print('P2P models loaded')
 
     clip.to('cpu')
     unet.to('cpu')
@@ -345,7 +344,7 @@ def run_p2p(prompt, prompt_edit, prompt_edit_token_weights,
             prompt_edit_tokens_start, prompt_edit_tokens_end,
             prompt_edit_spatial_start, prompt_edit_spatial_end,
             guidance_scale, steps, seed, width, height,
-            init_image, init_image_strength):
+            init_image, init_image_strength, e_outdir):
                 clip.to('cuda')
                 unet.to('cuda')
                 vae.to('cuda')
@@ -371,13 +370,17 @@ def run_p2p(prompt, prompt_edit, prompt_edit_token_weights,
                 init_image=None
                 init_image_strength=0.5
                 """
-                print(f'debug: {init_image}')
                 init_image = Image.fromarray(init_image.astype(np.uint8))
                 output = stablediffusion(prompt, prompt_edit, prompt_edit_token_weights,
                                       prompt_edit_tokens_start, prompt_edit_tokens_end,
                                       prompt_edit_spatial_start, prompt_edit_spatial_end,
                                       guidance_scale, steps, seed, width, height,
                                       init_image, init_image_strength)
+                if prompt == None:
+                    prompt = "Prompt was none"
+                p_sanitized = sanitize(prompt)
+                os.makedirs(e_outdir, exist_ok=True)
+                output.save(os.path.join(e_outdir, f"{prompt[:128]}_{seed}_{random.randint(10000, 99999)}.png"))
                 return output
 
 
@@ -2391,6 +2394,8 @@ with demo:
                     e_init_image_strength = gr.Slider(minimum=0, maximum=2, step=0.1, label='Init Image Strength', value=0.5, interactive=True)
                     edit_btn = gr.Button('edit')
                     edit_output = gr.Image()
+                    e_outdir = gr.Textbox(label='Output Dir',  placeholder='/content/', lines=1, value=f'{opt.outdir}/_editor', interactive=True)#outdir
+
         with gr.TabItem('NoodleSoup'):
             with gr.Column():
                 input_prompt = gr.Textbox(label='IN',  placeholder='Portrait of a _adj-beauty_ _noun-emote_ _nationality_ woman from _pop-culture_ in _pop-location_ with pearlescent skin and white hair by _artist_, _site_', lines=2)
@@ -2530,7 +2535,7 @@ with demo:
                     prompt_edit_tokens_start, prompt_edit_tokens_end,
                     prompt_edit_spatial_start, prompt_edit_spatial_end,
                     e_guidance_scale, e_steps, e_seed, e_width, e_height,
-                    e_init_image, e_init_image_strength]
+                    e_init_image, e_init_image_strength, e_outdir]
     editor_outputs=[edit_output]
 
     var_btn.click(variations, inputs=var_inputs, outputs=var_outputs)
