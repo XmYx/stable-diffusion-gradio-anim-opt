@@ -1021,7 +1021,6 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
 
         b_prompts = list(b_prompts.split("\n"))
         g_outdir = f'{b_outdir}/_grid_images'
-        b_outdir = f'{b_outdir}/_batch_images'
         # create output folder for the batch
         os.makedirs(b_outdir, exist_ok=True)
         if b_save_settings or b_save_samples:
@@ -1029,7 +1028,7 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
 
         #save settings for the batch
         if b_save_settings:
-            filename = os.path.join(b_outdir, f"{b_name}_{b_seed}_{random.randint(10000, 99999)}_settings.txt")
+            filename = os.path.join(opt.cfg_path, f"{b_name}_{b_seed}_{random.randint(10000, 99999)}_settings.txt")
             with open(filename, "w+", encoding="utf-8") as f:
                 json.dump(dict(batchargs.__dict__), f, ensure_ascii=False, indent=4)
 
@@ -1940,7 +1939,7 @@ with demo:
                     b_steps = gr.Slider(minimum=1, maximum=300, step=1, label='Steps', value=100, interactive=True)#steps
                     b_scale = gr.Slider(minimum=1, maximum=25, step=1, label='Scale', value=11, interactive=True)#scale
                     b_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
-                    b_outdir = gr.Textbox(label='Output Dir',  placeholder='/content/', lines=1, value=opt.outdir, interactive=True)#outdir
+                    b_outdir = gr.Textbox(label='Output Dir',  placeholder='/content/', lines=1, value=f'{opt.outdir}/_batch_images', interactive=True)#outdir
                     batch_btn = gr.Button('Generate')
                     with gr.Row():
                       b_mask_brightness_adjust = gr.Slider(minimum=0, maximum=2, step=0.1, label='Mask Brightness', value=1.0, interactive=True)
