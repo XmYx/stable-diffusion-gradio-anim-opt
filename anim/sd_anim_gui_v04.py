@@ -497,7 +497,7 @@ def sample_to_cv2(sample: torch.Tensor) -> np.ndarray:
     sample_int8 = (sample_f32 * 255).astype(np.uint8)
     return sample_int8
 
-def makevideo(outdir, batch_name, seed, timestring, max_frames):
+def makevideo(outdir, mp4_p, batch_name, seed, timestring, max_frames):
     skip_video_for_run_all = False #@param {type: 'boolean'}
     fps = 12#@param {type:"number"}
 
@@ -506,7 +506,7 @@ def makevideo(outdir, batch_name, seed, timestring, max_frames):
     else:
         print('Saving video')
         image_path = os.path.join(outdir, f"{timestring}_%05d.png")
-        mp4_path = os.path.join(outdir, f"{batch_name}_{seed}_{timestring}.mp4")
+        mp4_path = os.path.join(mp4_p, f"{batch_name}_{seed}_{timestring}.mp4")
 
         print(f"{image_path} -> {mp4_path}")
 
@@ -723,10 +723,6 @@ def parse_key_frames(string, prompt_parser=None):
         raise RuntimeError('Key Frame string not correctly formatted')
     return frames
 
-def refresh(choice):
-    print(choice)
-    #choice = None
-    return choice
 
 #Image generator
 
@@ -735,7 +731,8 @@ def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, 
     precision = "autocast"
     seed_everything(seed)
     os.makedirs(outdir, exist_ok=True)
-
+    if samplern == 'plms':
+      ddim_eta = 0
     if samplern == 'plms':
         sampler = PLMSSampler(model)
     else:
@@ -834,7 +831,10 @@ def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, 
                         if init_latent is not None and strength > 0:
                             z_enc = sampler.stochastic_encode(init_latent, torch.tensor([t_enc]*batch_size).to(device))
                         else:
-                            z_enc = torch.randn([n_samples, C, H // f, W // f], device=device)
+                            if type(H) == 'int':
+                              H = int(H)
+                              W = int(W)
+                            z_enc = torch.randn([n_samples, 4, H // 8, W // 8], device=device)
                         if samplern == 'ddim':
                             samples = sampler.decode(z_enc,
                                                      c,
@@ -1020,7 +1020,8 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
         #b_prompts = prompts
 
         b_prompts = list(b_prompts.split("\n"))
-
+        g_outdir = f'{b_outdir}/_grid_images'
+        b_outdir = f'{b_outdir}/_batch_images'
         # create output folder for the batch
         os.makedirs(b_outdir, exist_ok=True)
         if b_save_settings or b_save_samples:
@@ -1139,7 +1140,7 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
             grid_filename = f"{b_sanitized}_{b_name}_{iprompt:05d}_grid_{random.randint(10000, 99999)}.png"
             grid_image = Image.fromarray(grid.astype(np.uint8))
             grid_image.save(os.path.join(b_outdir, grid_filename))
-            grid_path = f"{b_outdir}/{grid_filename}"
+            grid_path = f"{g_outdir}/{grid_filename}"
             b_outputs.append(grid_path)
         return b_outputs
 
@@ -1621,7 +1622,7 @@ def anim(animation_mode, animation_prompts, key_frames,
                 seed = random.randint(0, 2**32)
             mp4_p = f'{outdir}/_mp4s'
             os.makedirs(mp4_p, exist_ok=True)
-            outdir = f'{outdir}/{batch_name}_{seed}_{timestring}'
+            outdir = f'{outdir}/_anim_stills/{batch_name}_{seed}_{timestring}'
 
             if animation_mode == 'Video Input':
                 use_init = True
@@ -1647,7 +1648,7 @@ def anim(animation_mode, animation_prompts, key_frames,
                                   strength, use_mask, mask_file,
                                   mask_contrast_adjust, mask_brightness_adjust,
                                   invert_mask)
-                mp4_path = makevideo(mp4_p, timestring, max_frames)
+                mp4_path = makevideo(outdir, mp4_p, batch_name, seed, timestring, max_frames)
                 torch_gc()
                 return mp4_path
             elif animation_mode == 'Video Input':
@@ -1657,7 +1658,7 @@ def anim(animation_mode, animation_prompts, key_frames,
                                 translation_z, noise_schedule, contrast_schedule,
                                 outdir, extract_nth_frame, video_init_path,
                                 max_frames, use_init)
-                mp4_path = makevideo(outdir, timestring, max_frames)
+                mp4_path = makevideo(outdir, mp4_p, batch_name, seed, timestring, max_frames)
                 torch_gc()
                 return mp4_path
             elif animation_mode == 'Interpolation':
@@ -1669,7 +1670,7 @@ def anim(animation_mode, animation_prompts, key_frames,
                                   strength, use_mask, mask_file,
                                   mask_contrast_adjust, mask_brightness_adjust,
                                   invert_mask, timestring)
-                mp4_path = makevideo(outdir, batch_name, seed, timestring, max_frames)
+                mp4_path = makevideo(outdir, mp4_p, batch_name, seed, timestring, max_frames)
 
                 torch_gc()
 
@@ -1744,13 +1745,15 @@ soup_help2 ="""
 prompt_placeholder = "First Prompt\nSecond Prompt\nThird Prompt\n\nMake sure your prompts are divided by having them in separate lines."
 keyframe_placeholder = "0\n25\n50\n\nMake sure you only have numbers here, and they are all in new lines, without empty lines."
 list1 = []
+os.makedirs(f'{opt.outdir}/_mp4s', exist_ok=True)
 mp4_pathlist=os.listdir(f'{opt.outdir}/_mp4s')
 
 def view_video(mp4_path_to_view):
   mp4_pathlist=os.listdir(f'{opt.outdir}/_mp4s')
   return gr.Video.update(value=f'{opt.outdir}/_mp4s/{mp4_path_to_view}'), gr.Dropdown.update(choices=mp4_pathlist)
 
-
+def refresh(choice):
+  return gr.update(value=choice['image'])
 
 
 if opt.cfg_path == "" or opt.cfg_path == None:
@@ -1937,7 +1940,7 @@ with demo:
                     b_steps = gr.Slider(minimum=1, maximum=300, step=1, label='Steps', value=100, interactive=True)#steps
                     b_scale = gr.Slider(minimum=1, maximum=25, step=1, label='Scale', value=11, interactive=True)#scale
                     b_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
-                    b_outdir = gr.Textbox(label='Output Dir',  placeholder='/content/', lines=1, value='/gdrive/MyDrive/sd_anims', interactive=True)#outdir
+                    b_outdir = gr.Textbox(label='Output Dir',  placeholder='/content/', lines=1, value=opt.outdir, interactive=True)#outdir
                     batch_btn = gr.Button('Generate')
                     with gr.Row():
                       b_mask_brightness_adjust = gr.Slider(minimum=0, maximum=2, step=0.1, label='Mask Brightness', value=1.0, interactive=True)
@@ -1956,9 +1959,9 @@ with demo:
                                 placeholder='a beautiful forest by Asher Brown Durand, trending on Artstation\na beautiful city by Asher Brown Durand, trending on Artstation',
                                 lines=1)#animation_prompts
                     inPaint_btn = gr.Button('Generate')
-                    i_strength = gr.Slider(minimum=0, maximum=1, step=0.01, label='Init Image Strength', value=0.00, interactive=True)#strength
+                    i_strength = gr.Slider(minimum=0, maximum=1, step=0.01, label='Init Image Strength', value=0.01, interactive=True)#strength
                     i_batch_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
-                    i_outdir = gr.Textbox(label='Output Dir',  placeholder='/content/', lines=1, value='/gdrive/MyDrive/sd_anims/', interactive=True)#outdir
+                    i_outdir = gr.Textbox(label='Output Dir',  placeholder='/content/', lines=1, value=f'{opt.outdir}/_inPaint', interactive=True)#outdir
                     i_use_mask = gr.Checkbox(label='Use Mask Path', value=True, visible=False) #@param {type:"boolean"}
                     i_mask_file = gr.Textbox(label='Mask File', placeholder='https://www.filterforge.com/wiki/images/archive/b/b7/20080927223728%21Polygonal_gradient_thumb.jpg', interactive=True) #@param {type:"string"}
                     with gr.Row():
@@ -1971,7 +1974,7 @@ with demo:
                 with gr.Column():
                     inPainted = gr.Gallery()
                     i_sampler = gr.Radio(label='Sampler',
-                                     choices=['klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim'],
+                                     choices=['klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral', 'ddim'],
                                      value='klms', interactive=True)#sampler
                     with gr.Row():
                         i_GFPGAN = gr.Checkbox(label='GFPGAN, Upscaler', value=False)
@@ -2018,7 +2021,7 @@ with demo:
                                 v_bg_upsampling = gr.Checkbox(label='BG Enhancement', value=False)
                                 v_upscale = gr.Slider(minimum=1, maximum=8, step=1, label='Upscaler, 1 to turn off', value=1, interactive=True)
                         output_var = gr.Gallery()
-                    var_outdir = gr.Textbox(label='Output Folder',  value='/gdrive/MyDrive/variations', lines=1)
+                    var_outdir = gr.Textbox(label='Output Folder',  value=f'{opt.outdir}/_variations', lines=1)
                     v_ddim_eta = gr.Slider(minimum=0, maximum=1, step=0.01, label='DDIM ETA', value=1.0, interactive=True)#scale
                     with gr.Row():
 
@@ -2170,7 +2173,7 @@ with demo:
 
     soup_btn.click(fn=process_noodle_soup, inputs=soup_inputs, outputs=soup_outputs)
 
-    refresh_btn.click(refresh, inputs=inPaint, outputs=inPaint)
+    refresh_btn.click(fn=refresh, inputs=i_init_img_array, outputs=i_init_img_array)
     inPaint_btn.click(fn=run_batch, inputs=mask_inputs, outputs=inPaint_outputs)
 
     anim_btn.click(fn=anim, inputs=anim_inputs, outputs=anim_outputs)
