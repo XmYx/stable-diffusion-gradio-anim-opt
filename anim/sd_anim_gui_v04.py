@@ -36,6 +36,7 @@ parser.add_argument("--ckpt", type=str, help="Model Path", default=None)
 parser.add_argument("--no_var", type=str, help="Variations Model Path", default=None)
 parser.add_argument("--var_ckpt", type=str, help="Variations Model Path", default=None)
 parser.add_argument("--cfg_path", type=str, help="Config Snapshots Path", default=None)
+parser.add_argument("--outdir", type=str, help="Config Snapshots Path", default=None)
 
 opt = parser.parse_args()
 
@@ -496,7 +497,7 @@ def sample_to_cv2(sample: torch.Tensor) -> np.ndarray:
     sample_int8 = (sample_f32 * 255).astype(np.uint8)
     return sample_int8
 
-def makevideo(outdir, timestring, max_frames):
+def makevideo(outdir, batch_name, seed, timestring, max_frames):
     skip_video_for_run_all = False #@param {type: 'boolean'}
     fps = 12#@param {type:"number"}
 
@@ -505,7 +506,7 @@ def makevideo(outdir, timestring, max_frames):
     else:
         print('Saving video')
         image_path = os.path.join(outdir, f"{timestring}_%05d.png")
-        mp4_path = os.path.join(outdir, f"{timestring}.mp4")
+        mp4_path = os.path.join(outdir, f"{batch_name}_{seed}_{timestring}.mp4")
 
         print(f"{image_path} -> {mp4_path}")
 
@@ -1159,6 +1160,7 @@ def anim(animation_mode, animation_prompts, key_frames,
         use_init, init_image, init_strength, timestring,
         resume_from_timestring, resume_timestring, make_grid, inPaint, b_use_mask,
         b_mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust):
+            opt.outdir = outdir
             model.to('cuda')
             strength = init_strength
             #Load Default Values
@@ -1287,12 +1289,10 @@ def anim(animation_mode, animation_prompts, key_frames,
                 #prompts = animation_prompts
                 angle_series, zoom_series, translation_x_series, translation_y_series, translation_z_series, rotation_3d_x_series, rotation_3d_y_series, rotation_3d_z_series, noise_schedule_series, strength_schedule_series, contrast_schedule_series = DeformAnimKeys(angle, zoom, translation_x, translation_y, translation_z, rotation_3d_x, rotation_3d_y, rotation_3d_z, noise_schedule, strength_schedule, contrast_schedule, max_frames)
                 #print(f'Keys: {keys}')
-                print(f'Strength Schedule Exists as: {strength_schedule_series}')
 
                 # resume animation
                 start_frame = 0
                 if resume_from_timestring:
-                    print('timestring enabled, but why?')
                     for tmp in os.listdir(outdir):
                         if tmp.split("_")[0] == resume_timestring:
                             start_frame += 1
@@ -1303,7 +1303,7 @@ def anim(animation_mode, animation_prompts, key_frames,
                 print(f"Saving animation frames to {outdir}")
 
                 #save settings for the batch
-                settings_filename = os.path.join(outdir, f"{timestring}_settings.txt")
+                settings_filename = os.path.join(opt.cfg_path, f"{batch_name}_{timestring}_settings.txt")
 
                 with open(settings_filename, "w+", encoding="utf-8") as f:
                       json.dump(dict(anim_args.__dict__), f, ensure_ascii=False, indent=4)
@@ -1348,7 +1348,6 @@ def anim(animation_mode, animation_prompts, key_frames,
                     noise = noise_schedule_series[frame_idx]
                     strength = strength_schedule_series[frame_idx]
                     contrast = contrast_schedule_series[frame_idx]
-                    print(f'ANIMDEBUG:STR:{strength}')
                     if frame_idx == 0:
                         strength = 0
                     # resume animation
@@ -1360,7 +1359,6 @@ def anim(animation_mode, animation_prompts, key_frames,
 
                     # apply transforms to previous frame
                     if prev_sample is not None:
-                        print("if you see this line at the first picture, thats not really good")
 
                         if animation_mode == '2D':
                             prev_img = anim_frame_warp_2d(sample_to_cv2(prev_sample), angle_series, zoom_series, translation_x_series, translation_y_series, frame_idx)
@@ -1397,7 +1395,6 @@ def anim(animation_mode, animation_prompts, key_frames,
                         init_frame = os.path.join(outdir, 'inputframes', f"{frame_idx+1:04}.jpg")
                         print(f"Using video init frame {init_frame}")
                         init_image = init_frame
-                    print(f'Strength should still be 0 but it is:{strength}')
                     # sample the diffusion model
                     results = generate(prompt, batch_name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, scale, seed, sampler, n_batch, n_samples, ddim_eta, use_init, init_image, init_sample, strength, use_mask, mask_file, mask_contrast_adjust, mask_brightness_adjust, invert_mask, dynamic_threshold, static_threshold, C, f, init_c, return_latent=False, return_sample=True)
 
@@ -1620,6 +1617,8 @@ def anim(animation_mode, animation_prompts, key_frames,
             mask_file = ""
             if seed == -1:
                 seed = random.randint(0, 2**32)
+            mp4_p = f'{outdir}/_mp4s'
+            os.makedirs(mp4_p, exist_ok=True)
             outdir = f'{outdir}/{batch_name}_{seed}_{timestring}'
 
             if animation_mode == 'Video Input':
@@ -1646,7 +1645,7 @@ def anim(animation_mode, animation_prompts, key_frames,
                                   strength, use_mask, mask_file,
                                   mask_contrast_adjust, mask_brightness_adjust,
                                   invert_mask)
-                mp4_path = makevideo(outdir, timestring, max_frames)
+                mp4_path = makevideo(mp4_p, timestring, max_frames)
                 torch_gc()
                 return mp4_path
             elif animation_mode == 'Video Input':
@@ -1668,7 +1667,7 @@ def anim(animation_mode, animation_prompts, key_frames,
                                   strength, use_mask, mask_file,
                                   mask_contrast_adjust, mask_brightness_adjust,
                                   invert_mask, timestring)
-                mp4_path = makevideo(outdir, timestring, max_frames)
+                mp4_path = makevideo(outdir, batch_name, seed, timestring, max_frames)
 
                 torch_gc()
 
@@ -1743,6 +1742,15 @@ soup_help2 ="""
 prompt_placeholder = "First Prompt\nSecond Prompt\nThird Prompt\n\nMake sure your prompts are divided by having them in separate lines."
 keyframe_placeholder = "0\n25\n50\n\nMake sure you only have numbers here, and they are all in new lines, without empty lines."
 list1 = []
+mp4_pathlist=os.listdir(f'{opt.outdir}/_mp4s')
+
+def view_video(mp4_path_to_view):
+  mp4_pathlist=os.listdir(f'{opt.outdir}/_mp4s')
+  return gr.Video.update(value=f'{opt.outdir}/_mp4s/{mp4_path_to_view}'), gr.Dropdown.update(choices=mp4_pathlist)
+
+
+
+
 if opt.cfg_path == "" or opt.cfg_path == None:
   opt.cfg_path = "/gdrive/MyDrive/sd_anim_configs"
 os.makedirs(opt.cfg_path, exist_ok=True)
@@ -1755,6 +1763,7 @@ with demo:
         with gr.TabItem('Animation'):
             with gr.Row():
                 with gr.Column(scale=3):
+                    mp4_path_to_view = gr.Dropdown(label='videos', choices=mp4_pathlist)
                     mp4_paths = gr.Video(label='Generated Video')
                     new_k_prompts = gr.Dataframe(headers=["keyframe", "prompt"], datatype=("number", "str"), col_count=(2, "fixed"), type='array')
 
@@ -1789,7 +1798,7 @@ with demo:
                     with gr.TabItem('Animation'):
                         with gr.Accordion(label = 'Render Settings', open=False):
                             batch_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
-                            outdir = gr.Textbox(label='Output Dir',  placeholder='/content', lines=1, value='/gdrive/MyDrive/sd_anims', interactive=True)#outdir
+                            outdir = gr.Textbox(label='Output Dir',  placeholder='/content', lines=1, value=opt.outdir, interactive=True)#outdir
                             sampler = gr.Radio(label='Sampler',
                                               choices=['klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim'],
                                               value='klms', interactive=True)#sampler
@@ -2149,6 +2158,13 @@ with demo:
 
     batch_outputs = [batch_outputs]
     inPaint_outputs = [inPainted]
+
+
+    view_inputs=[mp4_path_to_view]
+    view_outputs=[mp4_paths, mp4_path_to_view]
+
+    mp4_path_to_view.change(fn=view_video, inputs=view_inputs, outputs=view_outputs)
+
     add_cfg_btn.click(fn=add_cfg_to_seq, inputs=add_cfg_inputs, outputs=add_cfg_outputs)
     load_cfg_btn.click(fn=loadSnapshot, inputs=load_anim_cfg_inputs, outputs=anim_cfg_inputs)
     var_btn.click(variations, inputs=var_inputs, outputs=var_outputs)
