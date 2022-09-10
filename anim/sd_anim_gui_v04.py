@@ -976,7 +976,6 @@ def sample_model(input_im, model_var, sampler, precision, h, w, ddim_steps, n_sa
 
 #Batch Prompts by Deforum
 
-    return locals()
 def batch_dict(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
                 b_upscale, b_W, b_H, b_steps, b_scale, b_seed_behavior,
                 b_seed, b_sampler, b_save_grid, b_save_settings,
