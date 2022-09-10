@@ -3,6 +3,7 @@ from pickle import FALSE
 import threading, asyncio, argparse, math, os, pathlib, shutil, subprocess, sys, time
 import cv2
 import numpy as np
+from numpy.typing import _16Bit
 import pandas as pd
 import random
 from pandas.core.indexing import Sequence
@@ -1582,161 +1583,9 @@ def anim(animation_mode, animation_prompts, key_frames,
                 torch.cuda.empty_cache()
                 return result
 
-            def render_animation(animation_prompts, prompts, seed,
-                                  outdir, resume_from_timestring,
-                                  resume_timestring, timestring, angle, zoom,
-                                  translation_x, translation_y, translation_z,
-                                  rotation_3d_x, rotation_3d_y, rotation_3d_z,
-                                  noise_schedule, contrast_schedule, strength_schedule,
-                                  batch_name, GFPGAN, bg_upsampling, upscale, W, H,
-                                  steps, scale, sampler,
-                                  n_batch, n_samples, ddim_eta,
-                                  use_init, init_image, init_sample,
-                                  strength, use_mask, mask_file,
-                                  mask_contrast_adjust, mask_brightness_adjust,
-                                  invert_mask):
                 #prom = animation_prompts
                 #key = prompts
-                new_key = []
-                new_prom = []
-                #new_prom = list(prom.split("\n"))
-                #new_key = list(key.split("\n"))
-                for data in animation_prompts:
-                  k, p = data
-                  if type(k) != 'int' and k != '':
-                    k = int(k)
-                  if k != '':
-                    new_key.append(k)
-                  if p != '':
-                    new_prom.append(p)
-                prompts = dict(zip(new_key, new_prom))
-                #prompts = animation_prompts
-                print (prompts)
-                # animations use key framed prompts
-                #prompts = animation_prompts
-                angle_series, zoom_series, translation_x_series, translation_y_series, translation_z_series, rotation_3d_x_series, rotation_3d_y_series, rotation_3d_z_series, noise_schedule_series, strength_schedule_series, contrast_schedule_series = DeformAnimKeys(angle, zoom, translation_x, translation_y, translation_z, rotation_3d_x, rotation_3d_y, rotation_3d_z, noise_schedule, strength_schedule, contrast_schedule, max_frames)
-                #print(f'Keys: {keys}')
 
-                # resume animation
-                start_frame = 0
-                if resume_from_timestring:
-                    for tmp in os.listdir(outdir):
-                        if tmp.split("_")[0] == resume_timestring:
-                            start_frame += 1
-                    start_frame = start_frame - 1
-
-                # create output folder for the batch
-                os.makedirs(outdir, exist_ok=True)
-                print(f"Saving animation frames to {outdir}")
-
-                #save settings for the batch
-                settings_filename = os.path.join(opt.cfg_path, f"{batch_name}_{timestring}_settings.txt")
-
-                with open(settings_filename, "w+", encoding="utf-8") as f:
-                      json.dump(dict(anim_args.__dict__), f, ensure_ascii=False, indent=4)
-
-                # resume from timestring
-                if resume_from_timestring:
-                    timestring = resume_timestring
-
-
-                #promptList = list(animation_prompts.split("\n"))
-                #promptList = animation_prompts
-                prompt_series = pd.Series([np.nan for a in range(max_frames)])
-                for i in prompts:
-                    prompt_series[i] = prompts[i]
-
-                prompt_series = prompt_series.ffill().bfill()
-
-
-                print("PROMPT SERIES")
-
-                print(prompt_series)
-
-                print("END OF PROMPT SERIES")
-
-                # check for video inits
-                using_vid_init = animation_mode == 'Video Input'
-
-                # load depth model for 3D
-                if animation_mode == '3D' and use_depth_warping:
-                    download_depth_models()
-                    adabins_helper = InferenceHelper(dataset='nyu', device=device)
-                    midas_model, midas_transform, mtransform = load_depth_model()
-                    #load_depth_model()
-                else:
-                    adabins_helper, midas_model, midas_transform = None, None, None
-
-                n_samples = 1
-                prev_sample = None
-                color_match_sample = None
-                for frame_idx in range(start_frame,max_frames):
-                    print(f"Rendering animation frame {frame_idx} of {max_frames}")
-                    noise = noise_schedule_series[frame_idx]
-                    strength = strength_schedule_series[frame_idx]
-                    contrast = contrast_schedule_series[frame_idx]
-                    if frame_idx == 0:
-                        strength = 0
-                    # resume animation
-                    if resume_from_timestring:
-                        path = os.path.join(outdir,f"{timestring}_{frame_idx-1:05}.png")
-                        img = cv2.imread(path)
-                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                        prev_sample = sample_from_cv2(img)
-
-                    # apply transforms to previous frame
-                    if prev_sample is not None:
-
-                        if animation_mode == '2D':
-                            prev_img = anim_frame_warp_2d(sample_to_cv2(prev_sample), angle_series, zoom_series, translation_x_series, translation_y_series, frame_idx)
-                        else: # '3D'
-                            prev_img = anim_frame_warp_3d(sample_to_cv2(prev_sample), translation_x_series, translation_y_series, translation_z_series, rotation_3d_x_series, rotation_3d_y_series, rotation_3d_z_series, frame_idx, adabins_helper, midas_model, mtransform)
-
-                        # apply color matching
-                        if color_coherence != 'None':
-                            if color_match_sample is None:
-                                color_match_sample = prev_img.copy()
-                            else:
-                                prev_img = maintain_colors(prev_img, color_match_sample, color_coherence)
-
-                        # apply scaling
-                        contrast_sample = prev_img * contrast
-                        # apply frame noising
-                        noised_sample = add_noise(sample_from_cv2(contrast_sample), noise)
-
-                        # use transformed previous frame as init for current
-                        use_init = True
-                        #init_sample = noised_sample.half().to(device)
-                        if half_precision:
-                            init_sample = noised_sample.half().to(device)
-                        else:
-                            init_sample = noised_sample.to(device)
-                        strength = max(0.0, min(1.0, strength))
-
-                    # grab prompt for current frame
-                    prompt = prompt_series[frame_idx]
-                    print(f"{prompt} {seed}")
-
-                    # grab init image for current frame
-                    if using_vid_init:
-                        init_frame = os.path.join(outdir, 'inputframes', f"{frame_idx+1:04}.jpg")
-                        print(f"Using video init frame {init_frame}")
-                        init_image = init_frame
-                    # sample the diffusion model
-                    results = generate(prompt, batch_name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, scale, seed, sampler, n_batch, n_samples, ddim_eta, use_init, init_image, init_sample, strength, use_mask, mask_file, mask_contrast_adjust, mask_brightness_adjust, invert_mask, dynamic_threshold, static_threshold, C, f, init_c, return_latent=False, return_sample=True)
-
-
-
-
-
-                    sample, image = results[0], results[1]
-
-                    filename = f"{timestring}_{frame_idx:05}.png"
-                    image.save(os.path.join(outdir, filename))
-                    if not using_vid_init:
-                        prev_sample = sample
-
-                    seed = next_seed(seed, seed_behavior)
 
 
             def make_xform_2d(width, height, translation_x, translation_y, angle, scale):
@@ -1959,25 +1808,172 @@ def anim(animation_mode, animation_prompts, key_frames,
             if sampler != 'ddim':
                 ddim_eta = 0
             if animation_mode == '2D' or animation_mode == '3D':
-                render_animation(animation_prompts, prompts, seed,
-                                  outdir, resume_from_timestring,
-                                  resume_timestring, timestring, angle, zoom,
-                                  translation_x, translation_y, translation_z,
-                                  rotation_3d_x, rotation_3d_y, rotation_3d_z,
-                                  noise_schedule, contrast_schedule, strength_schedule,
-                                  batch_name, GFPGAN, bg_upsampling, upscale, W, H,
-                                  steps, scale, sampler,
-                                  n_batch, n_samples, ddim_eta,
-                                  use_init, init_image, init_sample,
-                                  strength, use_mask, mask_file,
-                                  mask_contrast_adjust, mask_brightness_adjust,
-                                  invert_mask)
+                new_key = []
+                new_prom = []
+                #new_prom = list(prom.split("\n"))
+                #new_key = list(key.split("\n"))
+                for data in animation_prompts:
+                  k, p = data
+                  if type(k) != 'int' and k != '':
+                    k = int(k)
+                  if k != '':
+                    new_key.append(k)
+                  if p != '':
+                    new_prom.append(p)
+                prompts = dict(zip(new_key, new_prom))
+                #prompts = animation_prompts
+                print (prompts)
+                # animations use key framed prompts
+                #prompts = animation_prompts
+                angle_series, zoom_series, translation_x_series, translation_y_series, translation_z_series, rotation_3d_x_series, rotation_3d_y_series, rotation_3d_z_series, noise_schedule_series, strength_schedule_series, contrast_schedule_series = DeformAnimKeys(angle, zoom, translation_x, translation_y, translation_z, rotation_3d_x, rotation_3d_y, rotation_3d_z, noise_schedule, strength_schedule, contrast_schedule, max_frames)
+                #print(f'Keys: {keys}')
+
+                # resume animation
+                start_frame = 0
+                if resume_from_timestring:
+                    for tmp in os.listdir(outdir):
+                        if tmp.split("_")[0] == resume_timestring:
+                            start_frame += 1
+                    start_frame = start_frame - 1
+
+                # create output folder for the batch
+                os.makedirs(outdir, exist_ok=True)
+                print(f"Saving animation frames to {outdir}")
+
+                #save settings for the batch
+                settings_filename = os.path.join(opt.cfg_path, f"{batch_name}_{timestring}_settings.txt")
+
+                with open(settings_filename, "w+", encoding="utf-8") as f:
+                      json.dump(dict(anim_args.__dict__), f, ensure_ascii=False, indent=4)
+
+                # resume from timestring
+                if resume_from_timestring:
+                    timestring = resume_timestring
+
+
+                #promptList = list(animation_prompts.split("\n"))
+                #promptList = animation_prompts
+                prompt_series = pd.Series([np.nan for a in range(max_frames)])
+                for i in prompts:
+                    prompt_series[i] = prompts[i]
+
+                prompt_series = prompt_series.ffill().bfill()
+
+
+                print("PROMPT SERIES")
+
+                print(prompt_series)
+
+                print("END OF PROMPT SERIES")
+
+                # check for video inits
+                using_vid_init = animation_mode == 'Video Input'
+
+                # load depth model for 3D
+                if animation_mode == '3D' and use_depth_warping:
+                    download_depth_models()
+                    adabins_helper = InferenceHelper(dataset='nyu', device=device)
+                    midas_model, midas_transform, mtransform = load_depth_model()
+                    #load_depth_model()
+                else:
+                    adabins_helper, midas_model, midas_transform = None, None, None
+
+                n_samples = 1
+                prev_sample = None
+                color_match_sample = None
+                for frame_idx in range(start_frame,max_frames):
+                    print(f"Rendering animation frame {frame_idx} of {max_frames}")
+                    noise = noise_schedule_series[frame_idx]
+                    strength = strength_schedule_series[frame_idx]
+                    contrast = contrast_schedule_series[frame_idx]
+                    if frame_idx == 0:
+                        strength = 0
+                    # resume animation
+                    if resume_from_timestring:
+                        path = os.path.join(outdir,f"{timestring}_{frame_idx-1:05}.png")
+                        img = cv2.imread(path)
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        prev_sample = sample_from_cv2(img)
+
+                    # apply transforms to previous frame
+                    if prev_sample is not None:
+
+                        if animation_mode == '2D':
+                            prev_img = anim_frame_warp_2d(sample_to_cv2(prev_sample), angle_series, zoom_series, translation_x_series, translation_y_series, frame_idx)
+                        else: # '3D'
+                            prev_img = anim_frame_warp_3d(sample_to_cv2(prev_sample), translation_x_series, translation_y_series, translation_z_series, rotation_3d_x_series, rotation_3d_y_series, rotation_3d_z_series, frame_idx, adabins_helper, midas_model, mtransform)
+
+                        # apply color matching
+                        if color_coherence != 'None':
+                            if color_match_sample is None:
+                                color_match_sample = prev_img.copy()
+                            else:
+                                prev_img = maintain_colors(prev_img, color_match_sample, color_coherence)
+
+                        # apply scaling
+                        contrast_sample = prev_img * contrast
+                        # apply frame noising
+                        noised_sample = add_noise(sample_from_cv2(contrast_sample), noise)
+
+                        # use transformed previous frame as init for current
+                        use_init = True
+                        #init_sample = noised_sample.half().to(device)
+                        if half_precision:
+                            init_sample = noised_sample.half().to(device)
+                        else:
+                            init_sample = noised_sample.to(device)
+                        strength = max(0.0, min(1.0, strength))
+
+                    # grab prompt for current frame
+                    prompt = prompt_series[frame_idx]
+                    print(f"{prompt} {seed}")
+
+                    # grab init image for current frame
+                    if using_vid_init:
+                        init_frame = os.path.join(outdir, 'inputframes', f"{frame_idx+1:04}.jpg")
+                        print(f"Using video init frame {init_frame}")
+                        init_image = init_frame
+                    # sample the diffusion model
+                    results = generate(prompt, batch_name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, scale, seed, sampler, n_batch, n_samples, ddim_eta, use_init, init_image, init_sample, strength, use_mask, mask_file, mask_contrast_adjust, mask_brightness_adjust, invert_mask, dynamic_threshold, static_threshold, C, f, init_c, return_latent=False, return_sample=True)
+
+
+
+
+
+                    sample, image = results[0], results[1]
+
+
+                    filename = f"{timestring}_{frame_idx:05}.png"
+                    image.save(os.path.join(outdir, filename))
+                    if not using_vid_init:
+                        prev_sample = sample
+
+                    seed = next_seed(seed, seed_behavior)
+
+                    path_to_yield = f"{outdir}/{filename}"
+
+                    img = image
+                    print(f'Yielding type: {type(img)}')
+                    print(f'Yielding: {img}')
+                    mp4_path = ""
+                    mp4_pathlist = []
+                    yield img, gr.update(visible=False), gr.update(visible=False)
+
+
+
+
+
+
                 mp4_path = makevideo(outdir, mp4_p, batch_name, seed, timestring, max_frames)
                 mp4_pathlist=os.listdir(f'{opt.outdir}/_mp4s')
 
 
                 torch_gc()
-                return mp4_path, gr.Dropdown.update(choices=mp4_pathlist)
+                if mp4_path == '':
+                    yield img, gr.update(visible=False, value=mp4_path), gr.Dropdown.update(visible=False, choices=mp4_pathlist)
+                else:
+                    yield gr.update(visible=False), gr.update(visible=True, value=mp4_path), gr.Dropdown.update(visible=True, choices=mp4_pathlist)
+                #return mp4_path, gr.Dropdown.update(choices=mp4_pathlist)
             elif animation_mode == 'Video Input':
                 render_input_video(animation_prompts, prompts, outdir,
                                 resume_from_timestring, resume_timestring,
@@ -2100,11 +2096,20 @@ for files in os.listdir(opt.cfg_path):
     if files.endswith(".txt"):
         list1.append(files)
 list2 = list1
+
+def test_update(scale):
+  for _ in range(10):
+        time.sleep(1)
+        image = np.random.random((600, 600, 3))
+        print(type(image))
+        yield image
+  yield image
 with demo:
     with gr.Tabs():
         with gr.TabItem('Animation'):
             with gr.Row():
                 with gr.Column(scale=3):
+                    img = gr.Image(visible=False)
                     mp4_path_to_view = gr.Dropdown(label='videos', choices=mp4_pathlist)
                     mp4_paths = gr.Video(label='Generated Video')
                     new_k_prompts = gr.Dataframe(headers=["keyframe", "prompt"], datatype=("number", "str"), col_count=(2, "fixed"), type='array')
@@ -2502,7 +2507,7 @@ with demo:
     kb_inputs = [kb_string, kb_frame, kb_value]
     kb_outputs = [kb_string, movement_settings]
 
-    anim_outputs = [mp4_paths, mp4_path_to_view]
+    anim_outputs = [img, mp4_paths, mp4_path_to_view]
 
     anim_cfg_inputs = [new_k_prompts, animation_mode,
                         strength, max_frames, border, key_frames,
@@ -2559,6 +2564,7 @@ with demo:
     batch_view_btn.click(fn=view_batch_file, inputs=[batch_path_to_view], outputs=[batch_outputs])
 
     edit_btn.click(fn=run_p2p, inputs=editor_inputs, outputs=editor_outputs)
+
 
 class ServerLauncher(threading.Thread):
     def __init__(self, demo):
