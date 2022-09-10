@@ -382,6 +382,7 @@ def run_p2p(prompt, prompt_edit, prompt_edit_token_weights,
                 p_sanitized = sanitize(prompt)
                 os.makedirs(e_outdir, exist_ok=True)
                 output.save(os.path.join(e_outdir, f"{prompt[:128]}_{seed}_{random.randint(10000, 99999)}.png"))
+                torch_gc()
                 return output
 
 
@@ -2100,7 +2101,8 @@ list2 = list1
 
 def stop():
     opt.should_stop = True
-    return
+    print('Generation should stop now..')
+    return opt.should_stop
 
 def test_update(scale):
   for _ in range(10):
@@ -2112,9 +2114,9 @@ def test_update(scale):
 with demo:
     with gr.Tabs():
         with gr.TabItem('Animation'):
+
             with gr.Row():
                 with gr.Column(scale=3):
-                    #stop_btn = gr.Button('stop')
                     img = gr.Image(visible=False)
                     mp4_path_to_view = gr.Dropdown(label='videos', choices=mp4_pathlist)
                     mp4_paths = gr.Video(label='Generated Video')
@@ -2246,6 +2248,9 @@ with demo:
 
 
         with gr.TabItem('Animation Director'):
+            with gr.Group():
+                stop_btn = gr.Button('stop')
+
             with gr.Column():
                 add_cfg_btn = gr.Button('add config snapshot to sequence')
                 cfg_seq_snapshots = gr.Dropdown(label = 'select snapshot to add', choices = list2, interactive=True)
@@ -2558,6 +2563,7 @@ with demo:
 
     anim_btn.click(fn=anim, inputs=anim_inputs, outputs=anim_outputs)
     kb_btn.click(fn=kb_build, inputs=kb_inputs, outputs=kb_outputs)
+    stop_btn.click(fn=stop, inputs=[], outputs=[])
 
     add_cfg_btn.click(fn=add_cfg_to_seq, inputs=add_cfg_inputs, outputs=add_cfg_outputs)
     save_cfg_btn.click(fn=saveSnapshot, inputs=anim_cfg_inputs, outputs=anim_cfg_outputs)
@@ -2590,7 +2596,7 @@ class ServerLauncher(threading.Thread):
             'debug': False
         }
         #if not opt.share:
-        demo.queue(concurrency_count=5, max_size=5, status_update_rate=1)
+        demo.queue(concurrency_count=5)
         #if opt.share and opt.share_password:
         #    gradio_params['auth'] = ('webui', opt.share_password)
 
