@@ -1141,7 +1141,13 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
             grid_image.save(os.path.join(b_outdir, grid_filename))
             grid_path = f"{g_outdir}/{grid_filename}"
             b_outputs.append(grid_path)
-        return b_outputs
+
+        batch_path_list=os.listdir(f'{opt.outdir}/_batch_images')
+
+
+        torch_gc()
+
+        return b_outputs, gr.Dropdown.update(choices=batch_path_list)
 
 #Animation by Deforum
 
@@ -1750,9 +1756,15 @@ list1 = []
 os.makedirs(f'{opt.outdir}/_mp4s', exist_ok=True)
 mp4_pathlist=os.listdir(f'{opt.outdir}/_mp4s')
 
+os.makedirs(f'{opt.outdir}/_batch_images', exist_ok=True)
+batch_pathlist=os.listdir(f'{opt.outdir}/_batch_images')
+
 def view_video(mp4_path_to_view):
   mp4_pathlist=os.listdir(f'{opt.outdir}/_mp4s')
   return gr.Video.update(value=f'{opt.outdir}/_mp4s/{mp4_path_to_view}'), gr.Dropdown.update(choices=mp4_pathlist)
+
+def view_batch_file(inputfile):
+  return gr.Gallery.update(value=[f'{opt.outdir}/_batch_images/{inputfile}'])
 
 def refresh_video_list():
   mp4_pathlist=os.listdir(f'{opt.outdir}/_mp4s')
@@ -1859,15 +1871,15 @@ with demo:
                             with gr.Row():
 
                                 with gr.Column():
-                                    angle = gr.Textbox(label='Angles',  placeholder='0:(0)', lines=1, value='0:(0)')#angle
-                                    zoom = gr.Textbox(label='Zoom',  placeholder='0: (1.04)', lines=1, value='0:(1.0)')#zoom
-                                    translation_x = gr.Textbox(label='Translation X (+ is Camera Left, large values [1 - 50])',  placeholder='0: (0)', lines=1, value='0:(0)')#translation_x
-                                    translation_y = gr.Textbox(label='Translation Y + = R',  placeholder='0: (0)', lines=1, value='0:(0)')#translation_y
-                                    translation_z = gr.Textbox(label='Translation Z + = FW',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#translation_y
+                                    angle = gr.Textbox(label='2D Angles (rotation)',  placeholder='0:(0)', lines=1, value='0:(0)')#angle
+                                    zoom = gr.Textbox(label='2D Zoom',  placeholder='0: (1.04)', lines=1, value='0:(1.0)')#zoom
+                                    translation_x = gr.Textbox(label='2D/3D Translation X (+ is Camera Left, large values [1 - 50])',  placeholder='0: (0)', lines=1, value='0:(0)')#translation_x
+                                    translation_y = gr.Textbox(label='2D/3D Translation Y + = Up',  placeholder='0: (0)', lines=1, value='0:(0)')#translation_y
+                                    translation_z = gr.Textbox(label='3D Translation Z + = Forward',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#translation_y
                                 with gr.Column():
-                                    rotation_3d_x = gr.Textbox(label='Rotation 3D X (+ is Up)',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#rotation_3d_x
-                                    rotation_3d_y = gr.Textbox(label='Rotation 3D Y (+ is Right)',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#rotation_3d_y
-                                    rotation_3d_z = gr.Textbox(label='Rotation 3D Z (+ is Clockwise)',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#rotation_3d_z
+                                    rotation_3d_x = gr.Textbox(label='3D Rotation X : Tilt (+ is Up)',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#rotation_3d_x
+                                    rotation_3d_y = gr.Textbox(label='3D Rotation Y : Pan (+ is Right)',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#rotation_3d_y
+                                    rotation_3d_z = gr.Textbox(label='3D Rotation Z : Push In(+ is Clockwise)',  placeholder='0: (0)', lines=1, value='0:(0)', visible=True)#rotation_3d_z
                                     midas_weight = gr.Slider(minimum=0, maximum=5, step=0.1, label='Midas Weight', value=0.3, visible=True)#midas_weight
                         with gr.Accordion('3D Settings', open=False):
                             use_depth_warping = gr.Checkbox(label='Depth Warping', value=True, visible=True)#use_depth_warping
@@ -1913,6 +1925,10 @@ with demo:
         with gr.TabItem('Batch Prompts'):
             with gr.Row():
                 with gr.Column():
+                    with gr.Row():
+                        batch_path_to_view = gr.Dropdown(label='videos', choices=batch_pathlist)
+                        batch_view_btn = gr.Button('view')
+
                     b_init_img_array = gr.Image(visible=False)
 
                     b_sampler = gr.Radio(label='Sampler',
@@ -2162,7 +2178,7 @@ with demo:
                         rotation_3d_z, use_depth_warping, midas_weight, near_plane,
                         far_plane, fov, padding_mode, sampling_mode]
 
-    batch_outputs = [batch_outputs]
+    batch_outs = [batch_outputs, batch_path_to_view]
     inPaint_outputs = [inPainted]
 
     add_cfg_inputs = [cfg_seq_snapshots, sequence]
@@ -2192,7 +2208,9 @@ with demo:
 
     mp4_path_to_view.change(fn=view_video, inputs=view_inputs, outputs=view_outputs)
 
-    batch_btn.click(fn=run_batch, inputs=batch_inputs, outputs=batch_outputs)
+    batch_btn.click(fn=run_batch, inputs=batch_inputs, outputs=batch_outs)
+    batch_view_btn.click(fn=view_batch_file, inputs=[batch_path_to_view], outputs=[batch_outputs])
+
 
 class ServerLauncher(threading.Thread):
     def __init__(self, demo):
