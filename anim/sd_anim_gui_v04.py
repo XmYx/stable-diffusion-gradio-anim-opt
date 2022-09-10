@@ -1648,8 +1648,11 @@ def anim(animation_mode, animation_prompts, key_frames,
                                   mask_contrast_adjust, mask_brightness_adjust,
                                   invert_mask)
                 mp4_path = makevideo(outdir, mp4_p, batch_name, seed, timestring, max_frames)
+                mp4_pathlist=os.listdir(f'{opt.outdir}/_mp4s')
+
+
                 torch_gc()
-                return mp4_path
+                return mp4_path, gr.Dropdown.update(choices=mp4_pathlist)
             elif animation_mode == 'Video Input':
                 render_input_video(animation_prompts, prompts, outdir,
                                 resume_from_timestring, resume_timestring,
@@ -1750,6 +1753,10 @@ mp4_pathlist=os.listdir(f'{opt.outdir}/_mp4s')
 def view_video(mp4_path_to_view):
   mp4_pathlist=os.listdir(f'{opt.outdir}/_mp4s')
   return gr.Video.update(value=f'{opt.outdir}/_mp4s/{mp4_path_to_view}'), gr.Dropdown.update(choices=mp4_pathlist)
+
+def refresh_video_list():
+  mp4_pathlist=os.listdir(f'{opt.outdir}/_mp4s')
+  return gr.Dropdown.update(choices=mp4_pathlist)
 
 def refresh(choice):
   return gr.update(value=choice['image'])
@@ -2138,7 +2145,7 @@ with demo:
     kb_inputs = [kb_string, kb_frame, kb_value]
     kb_outputs = [kb_string, movement_settings]
 
-    anim_outputs = [mp4_paths]
+    anim_outputs = [mp4_paths, mp4_path_to_view]
 
     anim_cfg_inputs = [new_k_prompts, animation_mode,
                         strength, max_frames, border, key_frames,
