@@ -766,7 +766,7 @@ def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, 
         assert mask_file is not None, "use_mask==True: An mask image is required for a mask"
         assert use_init, "use_mask==True: use_init is required for a mask"
         assert init_latent is not None, "use_mask==True: An latent init image is required for a mask"
-
+        print(f'Using Mask {mask_file}')
         mask = prepare_mask(mask_file,
                             init_latent.shape,
                             mask_contrast_adjust,
@@ -976,8 +976,13 @@ def sample_model(input_im, model_var, sampler, precision, h, w, ddim_steps, n_sa
 
 #Batch Prompts by Deforum
 
-def batch_dict(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling, b_upscale, b_W, b_H, b_steps, b_scale, b_seed_behavior, b_seed, b_sampler, b_save_grid, b_save_settings, b_save_samples, b_n_batch, b_n_samples, b_ddim_eta, b_use_init, b_init_image, b_strength, b_make_grid):
     return locals()
+def batch_dict(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
+                b_upscale, b_W, b_H, b_steps, b_scale, b_seed_behavior,
+                b_seed, b_sampler, b_save_grid, b_save_settings,
+                b_save_samples, b_n_batch, b_n_samples, b_ddim_eta,
+                b_use_init, b_init_image, b_strength, b_make_grid):
+                return locals()
 
 def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
               b_upscale, b_W, b_H, b_steps, b_scale, b_seed_behavior,
@@ -1038,10 +1043,6 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
         b_init_latent = None
         b_init_sample = None
         b_init_c = None
-        b_mask_contrast_adjust = 1.0
-        b_mask_brightness_adjust = 1.0
-        b_invert_mask = False
-        b_use_mask = False
         dynamic_threshold = None
         static_threshold = None
         precision = 'autocast'
@@ -1057,6 +1058,8 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
             b_mask_file = f'{b_outdir}/init/mask.png'
             b_init_img_array['image'].save(os.path.join(b_outdir, b_init_image))
             b_init_img_array['mask'].save(os.path.join(b_outdir, b_mask_file))
+            b_use_mask = True
+            b_use_init = True
         else:
             b_mask_file = ""
             b_mask_contrast_adjust = 1.0
@@ -1097,15 +1100,15 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
                     b_init_image = image
                     print(f'USING SEED FOR BATCH:{b_seed}')
 
-                    results = generate(prompt=b_prompts[iprompt], name=b_name, outdir=b_outdir,
-                                       GFPGAN=b_GFPGAN, bg_upsampling=b_bg_upsampling, upscale=b_upscale,
-                                       W=b_W, H=b_H, steps=b_steps, scale=b_scale, seed=b_seed,
-                                       samplern=b_sampler, n_batch=b_n_batch, n_samples=b_n_samples, ddim_eta=b_ddim_eta,
-                                       use_init=b_use_init, init_image=b_init_image,
-                                       init_sample=b_init_sample, strength=b_strength,
-                                       use_mask=b_use_mask, mask_file=b_mask_file,
-                                       mask_contrast_adjust=b_mask_contrast_adjust,
-                                       mask_brightness_adjust=b_mask_brightness_adjust, invert_mask=b_invert_mask,
+                    results = generate(b_prompts[iprompt], b_name, b_outdir,
+                                       b_GFPGAN, b_bg_upsampling, b_upscale,
+                                       b_W, b_H, b_steps, b_scale, b_seed,
+                                       b_sampler, b_n_batch, b_n_samples, b_ddim_eta,
+                                       b_use_init, b_init_image,
+                                       b_init_sample, b_strength,
+                                       b_use_mask, b_mask_file,
+                                       b_mask_contrast_adjust,
+                                       b_mask_brightness_adjust, b_invert_mask,
                                        dynamic_threshold=None, static_threshold=None, C=4, f=8, init_c=None)
 
 
@@ -1837,7 +1840,7 @@ with demo:
                                 contrast_schedule = gr.Textbox(label='Contrast Schedule',  placeholder='0:(0)', lines=1, value='0:(1.0)')#contrast_schedule
                                 noise_schedule = gr.Textbox(label='Noise Schedule',  placeholder='0:(0)', lines=1, value='0:(0.02)')#noise_schedule
 
-                        with gr.Accordion(label = 'Movements', open=False):
+                        with gr.Accordion(label = 'Movements', open=False) as movement_settings:
                             gr.Markdown('Keyframe Builder:')
                             with gr.Row():
                                 kb_frame = gr.Textbox(label = 'Frame', interactive = True)
@@ -2097,7 +2100,7 @@ with demo:
             kf = f'{string},{frame}:({value})'
       else:
         kf = string
-      return kf
+      return kf, gr.update(open=True)
 
     anim_func = anim
     anim_inputs = [animation_mode, new_k_prompts, key_frames,
@@ -2132,7 +2135,7 @@ with demo:
                     i_mask_file, i_invert_mask, i_mask_brightness_adjust, i_mask_contrast_adjust]
 
     kb_inputs = [kb_string, kb_frame, kb_value]
-    kb_outputs = [kb_string]
+    kb_outputs = [kb_string, movement_settings]
 
     anim_outputs = [mp4_paths]
 
@@ -2151,30 +2154,37 @@ with demo:
                         rotation_3d_z, use_depth_warping, midas_weight, near_plane,
                         far_plane, fov, padding_mode, sampling_mode]
 
-    anim_cfg_outputs = [cfg_snapshots, cfg_seq_snapshots]
-    load_anim_cfg_inputs = [cfg_snapshots]
-    add_cfg_inputs = [cfg_seq_snapshots, sequence]
-    add_cfg_outputs = [sequence]
-
     batch_outputs = [batch_outputs]
     inPaint_outputs = [inPainted]
 
+    add_cfg_inputs = [cfg_seq_snapshots, sequence]
+    add_cfg_outputs = [sequence]
 
     view_inputs=[mp4_path_to_view]
     view_outputs=[mp4_paths, mp4_path_to_view]
 
-    mp4_path_to_view.change(fn=view_video, inputs=view_inputs, outputs=view_outputs)
+    anim_cfg_outputs = [cfg_snapshots, cfg_seq_snapshots]
+    load_anim_cfg_inputs = [cfg_snapshots]
 
-    add_cfg_btn.click(fn=add_cfg_to_seq, inputs=add_cfg_inputs, outputs=add_cfg_outputs)
-    load_cfg_btn.click(fn=loadSnapshot, inputs=load_anim_cfg_inputs, outputs=anim_cfg_inputs)
+
     var_btn.click(variations, inputs=var_inputs, outputs=var_outputs)
+
     soup_btn.click(fn=process_noodle_soup, inputs=soup_inputs, outputs=soup_outputs)
-    save_cfg_btn.click(fn=saveSnapshot, inputs=anim_cfg_inputs, outputs=anim_cfg_outputs)
+
     refresh_btn.click(refresh, inputs=inPaint, outputs=inPaint)
     inPaint_btn.click(fn=run_batch, inputs=mask_inputs, outputs=inPaint_outputs)
+
     anim_btn.click(fn=anim, inputs=anim_inputs, outputs=anim_outputs)
-    batch_btn.click(fn=run_batch, inputs=batch_inputs, outputs=batch_outputs)
     kb_btn.click(fn=kb_build, inputs=kb_inputs, outputs=kb_outputs)
+
+    add_cfg_btn.click(fn=add_cfg_to_seq, inputs=add_cfg_inputs, outputs=add_cfg_outputs)
+    save_cfg_btn.click(fn=saveSnapshot, inputs=anim_cfg_inputs, outputs=anim_cfg_outputs)
+
+    load_cfg_btn.click(fn=loadSnapshot, inputs=load_anim_cfg_inputs, outputs=anim_cfg_inputs)
+
+    mp4_path_to_view.change(fn=view_video, inputs=view_inputs, outputs=view_outputs)
+
+    batch_btn.click(fn=run_batch, inputs=batch_inputs, outputs=batch_outputs)
 
 class ServerLauncher(threading.Thread):
     def __init__(self, demo):
