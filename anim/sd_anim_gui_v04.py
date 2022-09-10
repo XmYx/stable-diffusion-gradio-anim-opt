@@ -1821,7 +1821,7 @@ with demo:
                                 upscale = gr.Slider(minimum=1, maximum=8, step=1, label='Upscaler, 1 to turn off', value=1, interactive=True)
 
 
-                            n_batch = gr.Slider(minimum=1, maximum=25, step=1, label='Number of Batches', value=1, visible=False)#n_batch
+                            n_batch = gr.Slider(minimum=1, maximum=50, step=1, label='Number of Batches', value=1, visible=False)#n_batch
                             n_samples = gr.Slider(minimum=1, maximum=4, step=1, label='Samples (keep on 1)', value=1, visible=False)#n_samples
                             resume_timestring = gr.Textbox(label='Resume from:',  placeholder='20220829210106', lines=1, value='', interactive = True)
                             timestring = gr.Textbox(label='Timestring',  placeholder='timestring', lines=1, value='')#timestring
@@ -1920,7 +1920,7 @@ with demo:
                     b_seed = gr.Number(label='Seed',  placeholder='SEED HERE', value='-1', interactive=True)#seed
                     b_save_settings = gr.Checkbox(label='Save Settings', value=True, visible=True)#save_settings
                     b_save_samples = gr.Checkbox(label='Save Samples', value=True, visible=True)#save_samples
-                    b_n_batch = gr.Slider(minimum=1, maximum=25, step=1, label='Number of Batches', value=1, visible=True)#n_batch
+                    b_n_batch = gr.Slider(minimum=1, maximum=100, step=1, label='Number of Batches', value=1, visible=True)#n_batch
                     b_n_samples = gr.Slider(minimum=1, maximum=4, step=1, label='Samples (keep on 1)', value=1)#n_samples
                     b_ddim_eta = gr.Slider(minimum=0, maximum=1.0, step=0.1, label='DDIM ETA', value=0.0)#ddim_eta
                     b_use_init = gr.Checkbox(label='Use Init', value=False, visible=True)#use_init
@@ -2004,7 +2004,7 @@ with demo:
                         i_make_grid = gr.Checkbox(label='Make Grid', value=False)
                         i_save_samples = gr.Checkbox(label='Save Samples', value=True)
                         i_n_samples = gr.Slider(minimum=1, maximum=4, step=1, label='Samples', value=1, visible=True)
-                        i_n_batch = gr.Slider(minimum=1, maximum=20, step=1, label='Batches', value=1, visible=True)
+                        i_n_batch = gr.Slider(minimum=1, maximum=100, step=1, label='Batches', value=1, visible=True)
 
 
 
