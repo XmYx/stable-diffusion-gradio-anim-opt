@@ -406,8 +406,7 @@ def process_noodle_soup(text_prompts):
   nan = "nan"
   prompt_series = pd.Series([np.nan for a in range(len(new_prom))])
   for i, nan in prompt_series.items():
-    print(i)
-    print(nan)
+
     prompt_series[i] = new_prom[i]
   text_prompts = new_prom
 
@@ -504,6 +503,10 @@ def crash(e, s):
 
     del model
     del device
+    del model_var
+    del clip
+    del unet
+    del vae
 
     print('exiting...calling os._exit(0)')
     t = threading.Timer(0.25, os._exit, args=[0])
@@ -850,7 +853,9 @@ def makevideo(outdir, mp4_p, batch_name, seed, timestring, max_frames):
         '-preset', 'veryfast',
         mp4_path
         ]
-        subprocess.call(cmd)
+        with open(os.devnull, 'wb') as devnull:
+            process = subprocess.call(cmd, stdout=devnull)
+
     return mp4_path
         #process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         #stdout, stderr = process.communicate()
@@ -874,7 +879,6 @@ def DeformAnimKeys(angle, zoom, translation_x, translation_y, translation_z, rot
     noise_schedule_series = get_inbetweens(parse_key_frames(noise_schedule), max_frames)
     strength_schedule_series = get_inbetweens(parse_key_frames(strength_schedule), max_frames)
     contrast_schedule_series = get_inbetweens(parse_key_frames(contrast_schedule), max_frames)
-    print(f'Strength Schedule Exists as: {strength_schedule_series}')
     return angle_series, zoom_series, translation_x_series, translation_y_series, translation_z_series, rotation_3d_x_series, rotation_3d_y_series, rotation_3d_z_series, noise_schedule_series, strength_schedule_series, contrast_schedule_series
 
 def get_inbetweens(key_frames, max_frames, integer=False, interp_method='Linear'):
@@ -1048,7 +1052,6 @@ def parse_key_frames(string, prompt_parser=None):
 #Image generator
 
 def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, scale, seed, samplern, n_batch, n_samples, ddim_eta, use_init, init_image, init_sample, strength, use_mask, mask_file, mask_contrast_adjust, mask_brightness_adjust, invert_mask, dynamic_threshold, static_threshold, C, f, init_c, return_latent=False, return_sample=False, return_c=False):
-    print(f'Prompt when Generating: {prompt}')
     precision = "autocast"
     seed_everything(seed)
     os.makedirs(outdir, exist_ok=True)
@@ -1124,7 +1127,6 @@ def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, 
                     if isinstance(prompts, tuple):
                         prompts = list(prompts)
 
-                    print(f'Prompts when Generating: {prompts}')
 
                     c = model.get_learned_conditioning(prompts)
 
@@ -1310,32 +1312,8 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
               b_n_batch, b_n_samples, b_ddim_eta, b_use_init, b_init_image,
               b_strength, b_make_grid, b_init_img_array, b_use_mask,
               b_mask_file, b_invert_mask, b_mask_brightness_adjust, b_mask_contrast_adjust):
-        model.to('cuda')
+        timestring = time.strftime('%Y%m%d%H%M%S')
 
-        batchargs = SimpleNamespace(**batch_dict(b_prompts,
-                                                b_name,
-                                                b_outdir,
-                                                b_GFPGAN,
-                                                b_bg_upsampling,
-                                                b_upscale,
-                                                b_W,
-                                                b_H,
-                                                b_steps,
-                                                b_scale,
-                                                b_seed_behavior,
-                                                b_seed,
-                                                b_sampler,
-                                                b_save_grid,
-                                                b_save_settings,
-                                                b_save_samples,
-                                                b_n_batch,
-                                                b_n_samples,
-                                                b_ddim_eta,
-                                                b_use_init,
-                                                b_init_image,
-                                                b_strength,
-                                                b_make_grid
-        ))
 
         model.to('cuda')
         #b_prompts = prompts
@@ -1344,14 +1322,6 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
         g_outdir = f'{b_outdir}/_grid_images'
         # create output folder for the batch
         os.makedirs(b_outdir, exist_ok=True)
-        if b_save_settings or b_save_samples:
-            print(f"Saving to {b_outdir}_*")
-
-        #save settings for the batch
-        if b_save_settings:
-            filename = os.path.join(opt.cfg_path, f"{b_name}_{b_seed}_{random.randint(10000, 99999)}_settings.txt")
-            with open(filename, "w+", encoding="utf-8") as f:
-                json.dump(dict(batchargs.__dict__), f, ensure_ascii=False, indent=4)
 
         index = 0
         all_images = []
@@ -1369,13 +1339,15 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
         #fixed_code = True
         C = 4
         f = 8
-
+        b_seed_list = []
+        b_seed_list.append(b_seed)
 
         if b_init_img_array != None:
             initdir = f'{b_outdir}/init'
             os.makedirs(initdir, exist_ok=True)
-            b_init_image = f'{b_outdir}/init/init.png'
-            b_mask_file = f'{b_outdir}/init/mask.png'
+            r = random.randint(10000, 99999)
+            b_init_image = f'{b_outdir}/init/init_{b_seed}_{timestring}.png'
+            b_mask_file = f'{b_outdir}/init/mask_{b_seed}_{timestring}.png'
             b_init_img_array['image'].save(os.path.join(b_outdir, b_init_image))
             b_init_img_array['mask'].save(os.path.join(b_outdir, b_mask_file))
             b_use_mask = True
@@ -1408,7 +1380,7 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
         for iprompt, prompt in enumerate(b_prompts):
             b_prompt = b_prompts[iprompt]
             b_sanitized = sanitize(b_prompt)
-            b_sanitized = f'{b_sanitized[:128]}_{b_seed}_{random.randint(10000, 99999)}'
+            b_sanitized = f'{b_sanitized[:128]}_{b_seed}_{timestring}'
 
 
             for batch_index in range(b_n_batch):
@@ -1437,11 +1409,9 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
                         if b_make_grid:
                             all_images.append(T.functional.pil_to_tensor(image))
                         if b_save_samples:
-                            print(f"{b_outdir}/{b_sanitized}_{index:05}_{b_seed}.png")
 
                             b_filename = (f"{b_sanitized}_{index:05}.png")
                             b_fpath = (f"{b_outdir}/{b_filename}")
-                            print(f"File at: {b_fpath}")
 
                             image.save(os.path.join(b_outdir, b_filename))
                             b_outputs.append(b_fpath)
@@ -1450,6 +1420,7 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
                         index += 1
                     if b_seed_behavior != 'fixed':
                         b_seed = next_seed(b_seed, b_seed_behavior)
+                        b_seed_list.append(b_seed)
 
         print(f"Filepath List: {b_outputs}")
 
@@ -1464,6 +1435,44 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
             b_outputs.append(grid_path)
 
         batch_path_list=os.listdir(f'{opt.outdir}/_batch_images')
+        batchargs = SimpleNamespace(**batch_dict(b_prompts,
+                                                b_name,
+                                                b_outdir,
+                                                b_GFPGAN,
+                                                b_bg_upsampling,
+                                                b_upscale,
+                                                b_W,
+                                                b_H,
+                                                b_steps,
+                                                b_scale,
+                                                b_seed_behavior,
+                                                b_seed_list,
+                                                b_sampler,
+                                                b_save_grid,
+                                                b_save_settings,
+                                                b_save_samples,
+                                                b_n_batch,
+                                                b_n_samples,
+                                                b_ddim_eta,
+                                                b_use_init,
+                                                b_init_image,
+                                                b_strength,
+                                                b_make_grid
+        ))
+
+
+
+
+        if b_save_settings or b_save_samples:
+            print(f"Saving to {opt.cfg_path}/batch_configs/_*")
+
+        #save settings for the batch
+        if b_save_settings:
+            os.makedirs(f'{opt.cfg_path}/batch_configs', exist_ok=True)
+            filename = os.path.join(opt.cfg_path, f"batch_configs/{b_name}_{b_seed}_{timestring}_settings.txt")
+            with open(filename, "w+", encoding="utf-8") as f:
+                json.dump(dict(batchargs.__dict__), f, ensure_ascii=False, indent=4)
+
 
 
         torch_gc()
@@ -1474,6 +1483,62 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
 
 def anim_dict(new_k_prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode):
     return locals()
+
+def run_anim_seq(seqlist, seqname, outdir):
+    seq_list = list(seqlist.split("\n"))
+    for seq in seq_list:
+        path = f'{opt.cfg_path}/{seq}'
+        cfgfile = open(path)
+        scfg = json.load(cfgfile)
+        scfg = SimpleNamespace(**scfg)
+        cfgfile.close()
+
+        #Defaults
+        scfg.outdir = f'{outdir}/{seqname}_{random.randint(10000, 99999)}'
+        scfg.save_grid = False
+        scfg.save_settings = False
+        scfg.save_samples = True
+        scfg.display_samples = False
+        scfg.n_batch = 1
+        scfg.n_samples = 1
+        scfg.use_init = False
+        scfg.init_image = ""
+        scfg.init_strength = 0
+        scfg.timestring = ""
+        scfg.resume_from_timestring = False
+        scfg.resume_timestring = ""
+        scfg.make_grid = False
+        scfg.inPaint = None
+        scfg.b_use_mask = False
+        scfg.b_mask_file = ""
+        scfg.invert_mask = False
+        scfg.mask_brightness_adjust = 1.0
+        scfg.mask_contrast_adjust = 1.0
+        mp4_path = ''
+        scfg.prompts = ""
+        mp4_pathlist = []
+        scfg.keyframes = True
+
+        anim(scfg.animation_mode, scfg.new_k_prompts, scfg.key_frames,
+                scfg.prompts, scfg.batch_name, scfg.outdir, scfg.max_frames, scfg.GFPGAN,
+                scfg.bg_upsampling, scfg.upscale, scfg.W, scfg.H, scfg.steps, scfg.scale,
+                scfg.angle, scfg.zoom, scfg.translation_x, scfg.translation_y, scfg.translation_z,
+                scfg.rotation_3d_x, scfg.rotation_3d_y, scfg.rotation_3d_z, scfg.use_depth_warping,
+                scfg.midas_weight, scfg.near_plane, scfg.far_plane, scfg.fov, scfg.padding_mode,
+                scfg.sampling_mode, scfg.seed_behavior, scfg.seed, scfg.interp_spline, scfg.noise_schedule,
+                scfg.strength_schedule, scfg.contrast_schedule, scfg.sampler, scfg.extract_nth_frame,
+                scfg.interpolate_x_frames, scfg.border, scfg.color_coherence, scfg.previous_frame_noise,
+                scfg.previous_frame_strength, scfg.video_init_path, scfg.save_grid, scfg.save_settings,
+                scfg.save_samples, scfg.display_samples, scfg.n_batch, scfg.n_samples, scfg.ddim_eta,
+                scfg.use_init, scfg.init_image, scfg.init_strength, scfg.timestring,
+                scfg.resume_from_timestring, scfg.resume_timestring, scfg.make_grid, scfg.inPaint, scfg.b_use_mask,
+                scfg.b_mask_file, scfg.invert_mask, scfg.mask_brightness_adjust, scfg.mask_contrast_adjust)
+    print(img)
+    print(mp4_path)
+    yield gr.update(value=Image.img), gr.update(value=mp4_path)
+
+
+
 
 def anim(animation_mode, animation_prompts, key_frames,
         prompts, batch_name, outdir, max_frames, GFPGAN,
@@ -1488,7 +1553,9 @@ def anim(animation_mode, animation_prompts, key_frames,
         save_samples, display_samples, n_batch, n_samples, ddim_eta,
         use_init, init_image, init_strength, timestring,
         resume_from_timestring, resume_timestring, make_grid, inPaint, b_use_mask,
-        b_mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust):
+        b_mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust,
+        use_seq, seqlist, seqname):
+            img = np.random.random((600, 600, 3))
             opt.outdir = outdir
             model.to('cuda')
             strength = init_strength
@@ -1762,208 +1829,263 @@ def anim(animation_mode, animation_prompts, key_frames,
                 init_c = None
 
             #animation_prompts = dict(zip(new_key, new_prom))
-
-            print (prompts)
-            print (animation_prompts)
-            timestring = time.strftime('%Y%m%d%H%M%S')
-
-            #animation_mode = animation_mode
-            anim_dict(animation_prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode)
-
-            anim_args = SimpleNamespace(**anim_dict(animation_prompts, animation_mode,
-                                                  strength, max_frames, border, key_frames,
-                                                  interp_spline, angle, zoom, translation_x,
-                                                  translation_y, translation_z, color_coherence,
-                                                  previous_frame_noise, previous_frame_strength,
-                                                  video_init_path, extract_nth_frame, interpolate_x_frames,
-                                                  batch_name, outdir, save_grid, save_settings, save_samples,
-                                                  display_samples, n_samples, W, H, init_image, seed, sampler,
-                                                  steps, scale, ddim_eta, seed_behavior, n_batch, use_init,
-                                                  timestring, noise_schedule, strength_schedule, contrast_schedule,
-                                                  resume_from_timestring, resume_timestring, make_grid,
-                                                  GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y,
-                                                  rotation_3d_z, use_depth_warping, midas_weight, near_plane,
-                                                  far_plane, fov, padding_mode, sampling_mode))
-
-
-            outputs = []
-            if animation_mode == 'None':
-              max_frames = 1
-            strength = max(0.0, min(1.0, strength))
-            returns = {}
-            mask_file = ""
-            if seed == -1:
-                seed = random.randint(0, 2**32)
-            mp4_p = f'{outdir}/_mp4s'
-            os.makedirs(mp4_p, exist_ok=True)
-            outdir = f'{outdir}/_anim_stills/{batch_name}_{seed}_{timestring}'
-
-            if animation_mode == 'Video Input':
-                use_init = True
-            if not use_init:
-                init_image = None
-                strength = 0
-            if sampler == 'plms' and (use_init or animation_mode != 'None'):
-                print(f"Init images aren't supported with PLMS yet, switching to KLMS")
-                sampler = 'klms'
-            if sampler != 'ddim':
-                ddim_eta = 0
             if animation_mode == '2D' or animation_mode == '3D':
-                new_key = []
-                new_prom = []
-                #new_prom = list(prom.split("\n"))
-                #new_key = list(key.split("\n"))
-                for data in animation_prompts:
-                  k, p = data
-                  if type(k) != 'int' and k != '':
-                    k = int(k)
-                  if k != '':
-                    new_key.append(k)
-                  if p != '':
-                    new_prom.append(p)
-                prompts = dict(zip(new_key, new_prom))
-                #prompts = animation_prompts
-                print (prompts)
-                # animations use key framed prompts
-                #prompts = animation_prompts
-                angle_series, zoom_series, translation_x_series, translation_y_series, translation_z_series, rotation_3d_x_series, rotation_3d_y_series, rotation_3d_z_series, noise_schedule_series, strength_schedule_series, contrast_schedule_series = DeformAnimKeys(angle, zoom, translation_x, translation_y, translation_z, rotation_3d_x, rotation_3d_y, rotation_3d_z, noise_schedule, strength_schedule, contrast_schedule, max_frames)
-                #print(f'Keys: {keys}')
+                timestring = time.strftime('%Y%m%d%H%M%S')
 
-                # resume animation
-                start_frame = 0
-                if resume_from_timestring:
-                    for tmp in os.listdir(outdir):
-                        if tmp.split("_")[0] == resume_timestring:
-                            start_frame += 1
-                    start_frame = start_frame - 1
+                #animation_mode = animation_mode
+                anim_dict(animation_prompts, animation_mode, strength, max_frames, border, key_frames, interp_spline, angle, zoom, translation_x, translation_y, translation_z, color_coherence, previous_frame_noise, previous_frame_strength, video_init_path, extract_nth_frame, interpolate_x_frames, batch_name, outdir, save_grid, save_settings, save_samples, display_samples, n_samples, W, H, init_image, seed, sampler, steps, scale, ddim_eta, seed_behavior, n_batch, use_init, timestring, noise_schedule, strength_schedule, contrast_schedule, resume_from_timestring, resume_timestring, make_grid, GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y, rotation_3d_z, use_depth_warping, midas_weight, near_plane, far_plane, fov, padding_mode, sampling_mode)
 
-                # create output folder for the batch
-                os.makedirs(outdir, exist_ok=True)
-                print(f"Saving animation frames to {outdir}")
+                anim_args = SimpleNamespace(**anim_dict(animation_prompts, animation_mode,
+                                                      strength, max_frames, border, key_frames,
+                                                      interp_spline, angle, zoom, translation_x,
+                                                      translation_y, translation_z, color_coherence,
+                                                      previous_frame_noise, previous_frame_strength,
+                                                      video_init_path, extract_nth_frame, interpolate_x_frames,
+                                                      batch_name, outdir, save_grid, save_settings, save_samples,
+                                                      display_samples, n_samples, W, H, init_image, seed, sampler,
+                                                      steps, scale, ddim_eta, seed_behavior, n_batch, use_init,
+                                                      timestring, noise_schedule, strength_schedule, contrast_schedule,
+                                                      resume_from_timestring, resume_timestring, make_grid,
+                                                      GFPGAN, bg_upsampling, upscale, rotation_3d_x, rotation_3d_y,
+                                                      rotation_3d_z, use_depth_warping, midas_weight, near_plane,
+                                                      far_plane, fov, padding_mode, sampling_mode))
+                #Moving Sequence Animation to main anim loop to make sense
 
-                #save settings for the batch
-                settings_filename = os.path.join(opt.cfg_path, f"{batch_name}_{timestring}_settings.txt")
-
-                with open(settings_filename, "w+", encoding="utf-8") as f:
-                      json.dump(dict(anim_args.__dict__), f, ensure_ascii=False, indent=4)
-
-                # resume from timestring
-                if resume_from_timestring:
-                    timestring = resume_timestring
-
-
-                #promptList = list(animation_prompts.split("\n"))
-                #promptList = animation_prompts
-                prompt_series = pd.Series([np.nan for a in range(max_frames)])
-                for i in prompts:
-                    prompt_series[i] = prompts[i]
-
-                prompt_series = prompt_series.ffill().bfill()
-
-
-                print("PROMPT SERIES")
-
-                print(prompt_series)
-
-                print("END OF PROMPT SERIES")
-
-                # check for video inits
-                using_vid_init = animation_mode == 'Video Input'
-
-                # load depth model for 3D
-                if animation_mode == '3D' and use_depth_warping:
-                    download_depth_models()
-                    adabins_helper = InferenceHelper(dataset='nyu', device=device)
-                    midas_model, midas_transform, mtransform = load_depth_model()
-                    #load_depth_model()
+                if use_seq == True:
+                    seq_list = list(seqlist.split("\n"))
                 else:
-                    adabins_helper, midas_model, midas_transform = None, None, None
-                opt.should_stop = False
-                n_samples = 1
-                prev_sample = None
-                color_match_sample = None
-                for frame_idx in range(start_frame,max_frames):
-                    if opt.should_stop != True:
-                        print(f"Rendering animation frame {frame_idx} of {max_frames}")
-                        noise = noise_schedule_series[frame_idx]
-                        strength = strength_schedule_series[frame_idx]
-                        contrast = contrast_schedule_series[frame_idx]
-                        if frame_idx == 0:
-                            strength = 0
+                    seq_list = ['one line']
+
+                base_outdir = outdir
+                mp4_p = f'{outdir}/_mp4s'
+                total_frames = 0
+                for seq in seq_list:
+                    if use_seq == True:
+                        path = f'{opt.cfg_path}/{seq}'
+                        cfgfile = open(path)
+                        scfg = json.load(cfgfile)
+                        scfg = SimpleNamespace(**scfg)
+                        cfgfile.close()
+                        prev_total = total_frames
+                        total_frames = total_frames + scfg.max_frames
+                        print(f'Rendering animation sequence from frame: {prev_total} to {total_frames}')
+
+                        animation_mode = scfg.animation_mode
+                        animation_prompts = scfg.new_k_prompts
+                        key_frames = scfg.key_frames
+                        prompts = ""
+                        batch_name = scfg.batch_name
+                        outdir = f'{base_outdir}/_sequences/{seqname}_{timestring}'
+                        max_frames = scfg.max_frames
+                        #GFPGAN = scfg.GFPGAN
+                        #bg_upsampling = scfg.bg_upsampling
+                        #upscale = scfg.upscale
+                        #W = scfg.W
+                        #H = scfg.H
+                        steps = scfg.steps
+                        scale = scfg.scale
+                        angle = scfg.angle
+                        zoom = scfg.zoom
+                        translation_x = scfg.translation_x
+                        translation_y = scfg.translation_y
+                        translation_z = scfg.translation_z
+                        rotation_3d_x = scfg.rotation_3d_x
+                        rotation_3d_y = scfg.rotation_3d_y
+                        rotation_3d_z = scfg.rotation_3d_z
+                        use_depth_warping = scfg.use_depth_warping
+                        midas_weight = scfg.midas_weight
+                        near_plane = scfg.near_plane
+                        far_plane = scfg.far_plane
+                        fov = scfg.fov
+                        padding_mode = scfg.padding_mode
+                        sampling_mode = scfg.sampling_mode
+                        seed_behavior = scfg.seed_behavior
+                        seed = scfg.seed
+                        interp_spline = scfg.interp_spline
+                        noise_schedule = scfg.noise_schedule
+                        strength_schedule = scfg.strength_schedule
+                        contrast_schedule = scfg.contrast_schedule
+                        sampler = scfg.sampler
+                        extract_nth_frame = scfg.extract_nth_frame
+                        interpolate_x_frames = scfg.interpolate_x_frames
+                        border = scfg.border
+                        color_coherence = scfg.color_coherence
+                        previous_frame_noise = scfg.previous_frame_noise
+                        previous_frame_strength = scfg.previous_frame_strength
+                        video_init_path = scfg.video_init_path
+                    outputs = []
+                    if animation_mode == 'None':
+                      max_frames = 1
+                    strength = max(0.0, min(1.0, strength))
+                    returns = {}
+                    mask_file = ""
+                    if seed == -1:
+                        seed = random.randint(0, 2**32)
+                    os.makedirs(mp4_p, exist_ok=True)
+                    if use_seq == True:
+                        outdir =f'{outdir}/_anim_stills/{seqname}_{timestring}'
+                    else:
+                        outdir = f'{outdir}/_anim_stills/{batch_name}_{seed}_{timestring}'
+                    if animation_mode == 'Video Input':
+                        use_init = True
+                    if not use_init:
+                        init_image = None
+                        strength = 0
+                    if sampler == 'plms' and (use_init or animation_mode != 'None'):
+                        print(f"Init images aren't supported with PLMS yet, switching to KLMS")
+                        sampler = 'klms'
+                    if sampler != 'ddim':
+                        ddim_eta = 0
+                    if animation_mode == '2D' or animation_mode == '3D':
+                        new_key = []
+                        new_prom = []
+                        #new_prom = list(prom.split("\n"))
+                        #new_key = list(key.split("\n"))
+                        for data in animation_prompts:
+                          k, p = data
+                          if type(k) != 'int' and k != '':
+                            k = int(k)
+                          if k != '':
+                            new_key.append(k)
+                          if p != '':
+                            new_prom.append(p)
+                        prompts = dict(zip(new_key, new_prom))
+                        #prompts = animation_prompts
+                        # animations use key framed prompts
+                        #prompts = animation_prompts
+                        angle_series, zoom_series, translation_x_series, translation_y_series, translation_z_series, rotation_3d_x_series, rotation_3d_y_series, rotation_3d_z_series, noise_schedule_series, strength_schedule_series, contrast_schedule_series = DeformAnimKeys(angle, zoom, translation_x, translation_y, translation_z, rotation_3d_x, rotation_3d_y, rotation_3d_z, noise_schedule, strength_schedule, contrast_schedule, max_frames)
+                        #print(f'Keys: {keys}')
                         # resume animation
+                        start_frame = 0
                         if resume_from_timestring:
-                            path = os.path.join(outdir,f"{timestring}_{frame_idx-1:05}.png")
-                            img = cv2.imread(path)
-                            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                            prev_sample = sample_from_cv2(img)
+                            for tmp in os.listdir(outdir):
+                                if tmp.split("_")[0] == resume_timestring:
+                                    start_frame += 1
+                            start_frame = start_frame - 1
 
-                        # apply transforms to previous frame
-                        if prev_sample is not None:
+                        # create output folder for the batch
+                        os.makedirs(outdir, exist_ok=True)
+                        print(f"Saving animation frames to {outdir}")
 
-                            if animation_mode == '2D':
-                                prev_img = anim_frame_warp_2d(sample_to_cv2(prev_sample), angle_series, zoom_series, translation_x_series, translation_y_series, frame_idx)
-                            else: # '3D'
-                                prev_img = anim_frame_warp_3d(sample_to_cv2(prev_sample), translation_x_series, translation_y_series, translation_z_series, rotation_3d_x_series, rotation_3d_y_series, rotation_3d_z_series, frame_idx, adabins_helper, midas_model, mtransform)
+                        #save settings for the batch
+                        if use_seq != True:
+                            settings_filename = os.path.join(opt.cfg_path, f"{batch_name}_{timestring}_settings.txt")
+                            with open(settings_filename, "w+", encoding="utf-8") as f:
+                                  json.dump(dict(anim_args.__dict__), f, ensure_ascii=False, indent=4)
 
-                            # apply color matching
-                            if color_coherence != 'None':
-                                if color_match_sample is None:
-                                    color_match_sample = prev_img.copy()
+                        # resume from timestring
+                        if resume_from_timestring:
+                            timestring = resume_timestring
+
+
+                        #promptList = list(animation_prompts.split("\n"))
+                        #promptList = animation_prompts
+                        prompt_series = pd.Series([np.nan for a in range(max_frames)])
+                        for i in prompts:
+                            prompt_series[i] = prompts[i]
+
+                        prompt_series = prompt_series.ffill().bfill()
+
+                        # check for video inits
+                        using_vid_init = animation_mode == 'Video Input'
+
+                        # load depth model for 3D
+                        if animation_mode == '3D' and use_depth_warping:
+                            download_depth_models()
+                            adabins_helper = InferenceHelper(dataset='nyu', device=device)
+                            midas_model, midas_transform, mtransform = load_depth_model()
+                            #load_depth_model()
+                        else:
+                            adabins_helper, midas_model, midas_transform = None, None, None
+                        opt.should_stop = False
+                        n_samples = 1
+                        prev_sample = None
+                        color_match_sample = None
+
+                        for frame_idx in range(start_frame,max_frames):
+                            print(f"Rendering animation frame {frame_idx} of {max_frames}")
+                            noise = noise_schedule_series[frame_idx]
+                            strength = strength_schedule_series[frame_idx]
+                            contrast = contrast_schedule_series[frame_idx]
+                            if frame_idx == 0:
+                                strength = 0
+                            # resume animation
+                            if resume_from_timestring:
+                                path = os.path.join(outdir,f"{timestring}_{frame_idx-1:05}.png")
+                                img = cv2.imread(path)
+                                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                                prev_sample = sample_from_cv2(img)
+
+                            # apply transforms to previous frame
+                            if prev_sample is not None:
+
+                                if animation_mode == '2D':
+                                    prev_img = anim_frame_warp_2d(sample_to_cv2(prev_sample), angle_series, zoom_series, translation_x_series, translation_y_series, frame_idx)
+                                else: # '3D'
+                                    prev_img = anim_frame_warp_3d(sample_to_cv2(prev_sample), translation_x_series, translation_y_series, translation_z_series, rotation_3d_x_series, rotation_3d_y_series, rotation_3d_z_series, frame_idx, adabins_helper, midas_model, mtransform)
+
+                                # apply color matching
+                                if color_coherence != 'None':
+                                    if color_match_sample is None:
+                                        color_match_sample = prev_img.copy()
+                                    else:
+                                        prev_img = maintain_colors(prev_img, color_match_sample, color_coherence)
+
+                                # apply scaling
+                                contrast_sample = prev_img * contrast
+                                # apply frame noising
+                                noised_sample = add_noise(sample_from_cv2(contrast_sample), noise)
+
+                                # use transformed previous frame as init for current
+                                use_init = True
+                                #init_sample = noised_sample.half().to(device)
+                                if half_precision:
+                                    init_sample = noised_sample.half().to(device)
                                 else:
-                                    prev_img = maintain_colors(prev_img, color_match_sample, color_coherence)
+                                    init_sample = noised_sample.to(device)
+                                strength = max(0.0, min(1.0, strength))
 
-                            # apply scaling
-                            contrast_sample = prev_img * contrast
-                            # apply frame noising
-                            noised_sample = add_noise(sample_from_cv2(contrast_sample), noise)
+                            # grab prompt for current frame
+                            prompt = prompt_series[frame_idx]
+                            print(f"{prompt} {seed}")
 
-                            # use transformed previous frame as init for current
-                            use_init = True
-                            #init_sample = noised_sample.half().to(device)
-                            if half_precision:
-                                init_sample = noised_sample.half().to(device)
+                            # grab init image for current frame
+                            if using_vid_init:
+                                init_frame = os.path.join(outdir, 'inputframes', f"{frame_idx+1:04}.jpg")
+                                print(f"Using video init frame {init_frame}")
+                                init_image = init_frame
+                            # sample the diffusion model
+                            results = generate(prompt, batch_name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, scale, seed, sampler, n_batch, n_samples, ddim_eta, use_init, init_image, init_sample, strength, use_mask, mask_file, mask_contrast_adjust, mask_brightness_adjust, invert_mask, dynamic_threshold, static_threshold, C, f, init_c, return_latent=False, return_sample=True)
+
+
+
+
+
+                            sample, image = results[0], results[1]
+
+                            if use_seq == True:
+                                filename = f"{timestring}_{prev_total + frame_idx:05}.png"
                             else:
-                                init_sample = noised_sample.to(device)
-                            strength = max(0.0, min(1.0, strength))
+                                filename = f"{timestring}_{frame_idx:05}.png"
+                            image.save(os.path.join(outdir, filename))
+                            if not using_vid_init:
+                                prev_sample = sample
 
-                        # grab prompt for current frame
-                        prompt = prompt_series[frame_idx]
-                        print(f"{prompt} {seed}")
+                            seed = next_seed(seed, seed_behavior)
 
-                        # grab init image for current frame
-                        if using_vid_init:
-                            init_frame = os.path.join(outdir, 'inputframes', f"{frame_idx+1:04}.jpg")
-                            print(f"Using video init frame {init_frame}")
-                            init_image = init_frame
-                        # sample the diffusion model
-                        results = generate(prompt, batch_name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, scale, seed, sampler, n_batch, n_samples, ddim_eta, use_init, init_image, init_sample, strength, use_mask, mask_file, mask_contrast_adjust, mask_brightness_adjust, invert_mask, dynamic_threshold, static_threshold, C, f, init_c, return_latent=False, return_sample=True)
+
+                            img = image
+                            mp4_path = ''
+                            mp4_pathlist = []
+                            yield gr.update(value=img, visible=True), gr.update(visible=False)
 
 
 
 
-
-                        sample, image = results[0], results[1]
-
-
-                        filename = f"{timestring}_{frame_idx:05}.png"
-                        image.save(os.path.join(outdir, filename))
-                        if not using_vid_init:
-                            prev_sample = sample
-
-                        seed = next_seed(seed, seed_behavior)
-
-                        path_to_yield = f"{outdir}/{filename}"
-
-                        img = image
-                        print(f'Yielding type: {type(img)}')
-                        print(f'Yielding: {img}')
-                        mp4_path = ""
-                        mp4_pathlist = []
-                        yield gr.update(visible=True, value=img), gr.update(visible=False), gr.update(visible=False)
-
-
-
-
+                if use_seq == True:
+                  max_frames = total_frames
+                  batch_name = seqname
+                  seed = "sequence"
 
 
                 mp4_path = makevideo(outdir, mp4_p, batch_name, seed, timestring, max_frames)
@@ -1971,10 +2093,12 @@ def anim(animation_mode, animation_prompts, key_frames,
 
 
                 torch_gc()
-                if mp4_path == '':
-                    yield gr.update(visible=True, value=img), gr.update(visible=False, value=mp4_path), gr.Dropdown.update(visible=False, choices=mp4_pathlist)
+                if mp4_path == "":
+                    yield gr.update(value=img), gr.update(visible=False)
                 else:
-                    yield gr.update(visible=False), gr.update(visible=True, value=mp4_path), gr.Dropdown.update(visible=True, choices=mp4_pathlist)
+                    yield gr.update(visible=False), gr.update(value=mp4_path, visible=True)
+
+
                 #return mp4_path, gr.Dropdown.update(choices=mp4_pathlist)
             elif animation_mode == 'Video Input':
                 render_input_video(animation_prompts, prompts, outdir,
@@ -2081,14 +2205,27 @@ def view_video(mp4_path_to_view):
   return gr.Video.update(value=f'{opt.outdir}/_mp4s/{mp4_path_to_view}'), gr.Dropdown.update(choices=mp4_pathlist)
 
 def view_batch_file(inputfile):
-  return gr.Gallery.update(value=[f'{opt.outdir}/_batch_images/{inputfile}'])
+  print(inputfile)
+  print(type(inputfile))
+  print(f'{opt.outdir}/_batch_images/{inputfile}')
+  return gr.update(value=[f'{opt.outdir}/_batch_images/{inputfile}'])
+def view_editor_file(inputfile):
+  print(inputfile)
+  print(type(inputfile))
+  path = f'{opt.outdir}/_batch_images/{inputfile}'
+  image = Image.open(path).convert('RGB')
+  return gr.update(value=image)
+
+
+
 
 def refresh_video_list():
   mp4_pathlist=os.listdir(f'{opt.outdir}/_mp4s')
   return gr.Dropdown.update(choices=mp4_pathlist)
 
 def refresh(choice):
-  return gr.update(value=choice['image'])
+
+  return gr.update(value=choice)
 
 
 if opt.cfg_path == "" or opt.cfg_path == None:
@@ -2111,6 +2248,26 @@ def test_update(scale):
         print(type(image))
         yield image
   yield image
+
+print(f'I-------------------------------------------I')
+print(f'I                                           I')
+print(f'I        Stable Diffusion 1.4 Loaded        I')
+print(f'I              Anim GUI by mix              I')
+print(f'I                                           I')
+print(f'I              features loaded:             I')
+print(f'I                                           I')
+print(f'I      -  2D/3D Animation Sequencer         I')
+print(f'I      -  GFPGAN Upscaler                   I')
+print(f'I      -  Batch Prompts                     I')
+print(f'I      -  InPaint                           I')
+if opt.load_p2p:
+    print(f'I      -  Prompt to Prompt Image Editor     I')
+if not opt.no_var:
+    print(f'I      -  Variations model                  I')
+print(f'I                                           I')
+print(f'I-------------------------------------------I')
+
+
 with demo:
     with gr.Tabs():
         with gr.TabItem('Animation'):
@@ -2122,14 +2279,6 @@ with demo:
                     mp4_paths = gr.Video(label='Generated Video')
                     new_k_prompts = gr.Dataframe(headers=["keyframe", "prompt"], datatype=("number", "str"), col_count=(2, "fixed"), type='array')
 
-
-
-
-
-
-
-
-
                     animation_prompts = gr.Textbox(label='Prompts - divided by enter',
                                                     placeholder=prompt_placeholder,
                                                     lines=5, interactive=True, visible=False)#animation_prompts
@@ -2140,6 +2289,31 @@ with demo:
                                         placeholder=keyframe_placeholder,
                                         lines=5,
                                         interactive=True, visible=False)#prompts
+                    with gr.Accordion(label = 'Render Settings', open=False):
+                        batch_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
+                        outdir = gr.Textbox(label='Output Dir',  placeholder='/content', lines=1, value=opt.outdir, interactive=True)#outdir
+                        sampler = gr.Radio(label='Sampler',
+                                          choices=['klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim'],
+                                          value='klms', interactive=True)#sampler
+                        max_frames = gr.Slider(minimum=1, maximum=2500, step=1, label='Frames to render', value=20)#max_frames
+                        steps = gr.Slider(minimum=1, maximum=300, step=1, label='Steps', value=20, interactive=True)#steps
+                        scale = gr.Slider(minimum=1, maximum=25, step=1, label='Scale', value=11, interactive=True)#scale
+                        ddim_eta = gr.Slider(minimum=0, maximum=1.0, step=0.1, label='DDIM ETA', value=0.0)#ddim_eta
+                        with gr.Row():
+                            W = gr.Slider(minimum=256, maximum=8192, step=64, label='Width', value=512, interactive=True)#width
+                            H = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)#height
+                        with gr.Row():
+
+                            GFPGAN = gr.Checkbox(label='GFPGAN, Upscaler', value=False)
+                            bg_upsampling = gr.Checkbox(label='BG Enhancement', value=False)
+                            upscale = gr.Slider(minimum=1, maximum=8, step=1, label='Upscaler, 1 to turn off', value=1, interactive=True)
+
+
+                        n_batch = gr.Slider(minimum=1, maximum=50, step=1, label='Number of Batches', value=1, visible=False)#n_batch
+                        n_samples = gr.Slider(minimum=1, maximum=4, step=1, label='Samples (keep on 1)', value=1, visible=False)#n_samples
+                        resume_timestring = gr.Textbox(label='Resume from:',  placeholder='20220829210106', lines=1, value='', interactive = True)
+                        timestring = gr.Textbox(label='Timestring',  placeholder='timestring', lines=1, value='')#timestring
+
                     anim_btn = gr.Button('Generate')
                     with gr.Row():
                       with gr.Column():
@@ -2151,30 +2325,6 @@ with demo:
                         #output = gr.Text()
                 with gr.Column(scale=4):
                     with gr.TabItem('Animation'):
-                        with gr.Accordion(label = 'Render Settings', open=False):
-                            batch_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
-                            outdir = gr.Textbox(label='Output Dir',  placeholder='/content', lines=1, value=opt.outdir, interactive=True)#outdir
-                            sampler = gr.Radio(label='Sampler',
-                                              choices=['klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim'],
-                                              value='klms', interactive=True)#sampler
-                            max_frames = gr.Slider(minimum=1, maximum=2500, step=1, label='Frames to render', value=20)#max_frames
-                            steps = gr.Slider(minimum=1, maximum=300, step=1, label='Steps', value=20, interactive=True)#steps
-                            scale = gr.Slider(minimum=1, maximum=25, step=1, label='Scale', value=11, interactive=True)#scale
-                            ddim_eta = gr.Slider(minimum=0, maximum=1.0, step=0.1, label='DDIM ETA', value=0.0)#ddim_eta
-                            with gr.Row():
-                                W = gr.Slider(minimum=256, maximum=8192, step=64, label='Width', value=512, interactive=True)#width
-                                H = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)#height
-                            with gr.Row():
-
-                                GFPGAN = gr.Checkbox(label='GFPGAN, Upscaler', value=False)
-                                bg_upsampling = gr.Checkbox(label='BG Enhancement', value=False)
-                                upscale = gr.Slider(minimum=1, maximum=8, step=1, label='Upscaler, 1 to turn off', value=1, interactive=True)
-
-
-                            n_batch = gr.Slider(minimum=1, maximum=50, step=1, label='Number of Batches', value=1, visible=False)#n_batch
-                            n_samples = gr.Slider(minimum=1, maximum=4, step=1, label='Samples (keep on 1)', value=1, visible=False)#n_samples
-                            resume_timestring = gr.Textbox(label='Resume from:',  placeholder='20220829210106', lines=1, value='', interactive = True)
-                            timestring = gr.Textbox(label='Timestring',  placeholder='timestring', lines=1, value='')#timestring
                         with gr.Accordion(label = 'Animation Settings', open=False):
                             with gr.Row():
                                 border = gr.Dropdown(label='Border', choices=['wrap', 'replicate'], value='wrap')#border
@@ -2232,6 +2382,15 @@ with demo:
                             with gr.Row():
                                 save_settings = gr.Checkbox(label='Save Settings', value=True, visible=True)#save_settings
                                 resume_from_timestring = gr.Checkbox(label='Resume from Timestring', value=False, visible=True)#resume_from_timestring
+                        with gr.Accordion(label = 'Animation Sequncer', open=False) as sequencer_settings:
+                            with gr.Row():
+                                seqname = gr.Textbox(label='Sequence Name', interactive=True)
+                                use_seq = gr.Checkbox(label='Use Sequence', interactive=True)
+                            cfg_seq_snapshots = gr.Dropdown(label = 'select snapshot to add', choices = list2, interactive=True)
+                            add_cfg_btn = gr.Button('add config snapshot to sequence')
+                            sequence = gr.Textbox(label='sequence', lines = 10, interactive=True)
+
+
 
                     with gr.TabItem('Video / Init Video / Interpolation settings'):
                       with gr.Row():
@@ -2240,30 +2399,20 @@ with demo:
                       with gr.Row():
                           previous_frame_noise = gr.Slider(minimum=0.01, maximum=1.00, step=0.01, label='Prev Frame Noise', value=0.02)#previous_frame_noise
                           previous_frame_strength = gr.Slider(minimum=0.01, maximum=1.00, step=0.01, label='Prev Frame Strength', value=0.0)#previous_frame_strength
-
                       use_init = gr.Checkbox(label='Use Init', value=False, visible=True, interactive=True)#use_init
                       init_image = gr.Textbox(label='Init Image link',  placeholder='https://cdn.pixabay.com/photo/2022/07/30/13/10/green-longhorn-beetle-7353749_1280.jpg', lines=1, interactive=True)#init_image
                       video_init_path = gr.Textbox(label='Video init path',  placeholder='/content/video_in.mp4', lines=1)#video_init_path
                       strength = gr.Slider(minimum=0, maximum=1, step=0.1, label='Init Image Strength', value=0.0)#strength
 
 
-        with gr.TabItem('Animation Director'):
-            with gr.Group():
-                stop_btn = gr.Button('stop')
 
-            with gr.Column():
-                add_cfg_btn = gr.Button('add config snapshot to sequence')
-                cfg_seq_snapshots = gr.Dropdown(label = 'select snapshot to add', choices = list2, interactive=True)
-            with gr.Column():
-                sequence = gr.Textbox(label='sequence', lines = 10, interactive=True)
+
 
         with gr.TabItem('Batch Prompts'):
             with gr.Row():
                 with gr.Column():
                     with gr.Row():
-                        batch_path_to_view = gr.Dropdown(label='videos', choices=batch_pathlist)
-                        batch_view_btn = gr.Button('view')
-
+                        batch_path_to_view = gr.Dropdown(label='Images', choices=batch_pathlist)
                     b_init_img_array = gr.Image(visible=False)
 
                     b_sampler = gr.Radio(label='Sampler',
@@ -2307,7 +2456,8 @@ with demo:
         with gr.TabItem('InPainting'):
             with gr.Row():
                 with gr.Column():
-
+                    with gr.Row():
+                        i_path_to_view = gr.Dropdown(label='Images', choices=batch_pathlist)
                     refresh_btn = gr.Button('Refresh')
                     i_init_img_array = gr.Image(value=inPaint, source="upload", interactive=True,
                                                                       type="pil", tool="sketch", visible=True,
@@ -2393,25 +2543,32 @@ with demo:
         with gr.TabItem('Text Image Editing'):
             with gr.Row():
                 with gr.Column():
-                    e_prompt = gr.Textbox(label='Input Image Prompt',  value='', interactive=True, lines=1)
-                    prompt_edit = gr.Textbox(label='Input Image Prompt',  value='', interactive=True, lines=1)
-                    prompt_edit_token_weights = gr.Textbox(label='Input Image Prompt',  placeholder='[(2, 2.5), (6, -5.0)]', interactive=True, lines=1)
-                    prompt_edit_tokens_start = gr.Slider(minimum=0, maximum=2, step=0.1, label='Token Start', value=0.0, interactive=True)
-                    prompt_edit_tokens_end = gr.Slider(minimum=0, maximum=2, step=0.1, label='Token End', value=1.0, interactive=True)
-                    prompt_edit_spatial_start = gr.Slider(minimum=0, maximum=2, step=0.1, label='Token Spatial Start', value=0.0, interactive=True)
-                    prompt_edit_spatial_end = gr.Slider(minimum=0, maximum=2, step=0.1, label='Token Spatial End', value=1.0, interactive=True)
-                    e_guidance_scale = gr.Slider(minimum=0, maximum=25, step=0.1, label='Guidance Scale', value=7.5, interactive=True)
-                    e_steps = gr.Slider(minimum=10, maximum=250, step=1, label='Steps', value=50, interactive=True)
-                    e_seed = gr.Textbox(label='Seed',  value='', interactive=True, lines=1)
-                    e_width = gr.Slider(minimum=256, maximum=8192, step=64, label='Width', value=512, interactive=True)
-                    e_height = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)
-                with gr.Column():
+                    with gr.Row():
+                        p2p_path_to_view = gr.Dropdown(label='Images', choices=batch_pathlist)
                     e_init_image = gr.Image()
-                    e_init_image_strength = gr.Slider(minimum=0, maximum=2, step=0.1, label='Init Image Strength', value=0.5, interactive=True)
-                    edit_btn = gr.Button('edit')
-                    edit_output = gr.Image()
+                    e_prompt = gr.Textbox(label='Input Image Prompt',  value='', interactive=True, lines=2)
+                    prompt_edit = gr.Textbox(label='Input Image Prompt',  value='', interactive=True, lines=2)
+                    with gr.Row():
+                        e_width = gr.Slider(minimum=256, maximum=8192, step=64, label='Width', value=512, interactive=True)
+                        e_height = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)
+                    with gr.Row():
+                        e_steps = gr.Slider(minimum=10, maximum=250, step=1, label='Steps', value=50, interactive=True)
+                        e_init_image_strength = gr.Slider(minimum=0, maximum=2, step=0.1, label='Init Image Strength', value=0.5, interactive=True)
+                    e_guidance_scale = gr.Slider(minimum=0, maximum=25, step=0.1, label='Guidance Scale', value=7.5, interactive=True)
+                    e_seed = gr.Textbox(label='Seed',  value='', interactive=True, lines=1)
                     e_outdir = gr.Textbox(label='Output Dir',  placeholder='/content/', lines=1, value=f'{opt.outdir}/_editor', interactive=True)#outdir
+                    with gr.Accordion(label = 'Advanced Prompt Settings'):
+                        with gr.Row():
+                            prompt_edit_token_weights = gr.Textbox(label='Input Image Prompt',  placeholder='[(2, 2.5), (6, -5.0)]', interactive=True, lines=1)
+                            prompt_edit_tokens_start = gr.Slider(minimum=0, maximum=2, step=0.1, label='Token Start', value=0.0, interactive=True)
+                        with gr.Row():
+                            prompt_edit_tokens_end = gr.Slider(minimum=0, maximum=2, step=0.1, label='Token End', value=1.0, interactive=True)
+                            prompt_edit_spatial_start = gr.Slider(minimum=0, maximum=2, step=0.1, label='Token Spatial Start', value=0.0, interactive=True)
+                        prompt_edit_spatial_end = gr.Slider(minimum=0, maximum=2, step=0.1, label='Token Spatial End', value=1.0, interactive=True)
+                    edit_btn = gr.Button('edit')
 
+                with gr.Column():
+                    edit_output = gr.Image()
         with gr.TabItem('NoodleSoup'):
             with gr.Column():
                 input_prompt = gr.Textbox(label='IN',  placeholder='Portrait of a _adj-beauty_ _noun-emote_ _nationality_ woman from _pop-culture_ in _pop-location_ with pearlescent skin and white hair by _artist_, _site_', lines=2)
@@ -2425,6 +2582,8 @@ with demo:
 
     var_inputs = [input_var, var_outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_W, v_H, v_ddim_eta, v_GFPGAN, v_bg_upsampling, v_upscale]
     var_outputs = [output_var]
+
+
 
     soup_inputs = [input_prompt]
     soup_outputs = [output_prompt]
@@ -2471,7 +2630,7 @@ with demo:
             seq = f'{cfg}'
         else:
             seq = f'{seq}\n{cfg}'
-        return seq
+        return seq, gr.update(open=True)
 
     def kb_build(string, frame, value):
       if frame != "" and value != "":
@@ -2497,7 +2656,8 @@ with demo:
                     save_samples, display_samples, n_batch, n_samples, ddim_eta,
                     use_init, init_image, strength, timestring,
                     resume_from_timestring, resume_timestring, make_grid, b_init_img_array, b_use_mask,
-                    b_mask_file, b_invert_mask, b_mask_brightness_adjust, b_mask_contrast_adjust]
+                    b_mask_file, b_invert_mask, b_mask_brightness_adjust, b_mask_contrast_adjust,
+                    use_seq, sequence, seqname]
 
     batch_inputs = [b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
                     b_upscale, b_W, b_H, b_steps, b_scale, b_seed_behavior,
@@ -2518,7 +2678,7 @@ with demo:
     kb_inputs = [kb_string, kb_frame, kb_value]
     kb_outputs = [kb_string, movement_settings]
 
-    anim_outputs = [img, mp4_paths, mp4_path_to_view]
+    anim_outputs = [img, mp4_paths]
 
     anim_cfg_inputs = [new_k_prompts, animation_mode,
                         strength, max_frames, border, key_frames,
@@ -2535,11 +2695,14 @@ with demo:
                         rotation_3d_z, use_depth_warping, midas_weight, near_plane,
                         far_plane, fov, padding_mode, sampling_mode]
 
+
+
+
     batch_outs = [batch_outputs, batch_path_to_view]
     inPaint_outputs = [inPainted]
 
     add_cfg_inputs = [cfg_seq_snapshots, sequence]
-    add_cfg_outputs = [sequence]
+    add_cfg_outputs = [sequence, sequencer_settings]
 
     view_inputs=[mp4_path_to_view]
     view_outputs=[mp4_paths, mp4_path_to_view]
@@ -2563,7 +2726,7 @@ with demo:
 
     anim_btn.click(fn=anim, inputs=anim_inputs, outputs=anim_outputs)
     kb_btn.click(fn=kb_build, inputs=kb_inputs, outputs=kb_outputs)
-    stop_btn.click(fn=stop, inputs=[], outputs=[])
+
 
     add_cfg_btn.click(fn=add_cfg_to_seq, inputs=add_cfg_inputs, outputs=add_cfg_outputs)
     save_cfg_btn.click(fn=saveSnapshot, inputs=anim_cfg_inputs, outputs=anim_cfg_outputs)
@@ -2573,9 +2736,12 @@ with demo:
     mp4_path_to_view.change(fn=view_video, inputs=view_inputs, outputs=view_outputs)
 
     batch_btn.click(fn=run_batch, inputs=batch_inputs, outputs=batch_outs)
-    batch_view_btn.click(fn=view_batch_file, inputs=[batch_path_to_view], outputs=[batch_outputs])
+    batch_path_to_view.change(fn=view_batch_file, inputs=[batch_path_to_view], outputs=[batch_outputs])
+
 
     edit_btn.click(fn=run_p2p, inputs=editor_inputs, outputs=editor_outputs)
+    p2p_path_to_view.change(fn=view_editor_file, inputs=[p2p_path_to_view], outputs=[e_init_image])
+    i_path_to_view.change(fn=view_editor_file, inputs=[i_path_to_view], outputs=[i_init_img_array])
 
 
 class ServerLauncher(threading.Thread):
