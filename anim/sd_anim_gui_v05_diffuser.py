@@ -17,6 +17,7 @@ from contextlib import contextmanager, nullcontext
 from einops import rearrange, repeat
 from itertools import islice
 from omegaconf import OmegaConf
+import PIL
 from PIL import Image
 from pytorch_lightning import seed_everything
 from skimage.exposure import match_histograms
@@ -32,7 +33,62 @@ import gc
 
 #Prompt-to-Promtp image editing
 from transformers import CLIPModel, CLIPTextModel, CLIPTokenizer
-from diffusers import AutoencoderKL, UNet2DConditionModel
+from diffusers import StableDiffusionInpaintPipeline as StableDiffusionInpaintPipeline
+from diffusers import AutoencoderKL, DDPMScheduler, PNDMScheduler, StableDiffusionPipeline, UNet2DConditionModel
+from accelerate import Accelerator
+from accelerate.logging import get_logger
+from accelerate.utils import set_seed
+from IPython.display import Markdown
+
+def load_learned_embed_in_clip(learned_embeds_path, text_encoder, tokenizer, token=None):
+  loaded_learned_embeds = torch.load(learned_embeds_path, map_location="cpu")
+
+  # separate token and the embeds
+  trained_token = list(loaded_learned_embeds.keys())[0]
+  embeds = loaded_learned_embeds[trained_token]
+
+  # cast to dtype of text_encoder
+  dtype = text_encoder.get_input_embeddings().weight.dtype
+  embeds.to(dtype)
+
+  # add the token in tokenizer
+  token = token if token is not None else trained_token
+  num_added_tokens = tokenizer.add_tokens(token)
+  if num_added_tokens == 0:
+    raise ValueError(f"The tokenizer already contains the token {token}. Please pass a different `token` that is not already in the tokenizer.")
+
+  # resize the token embeddings
+  text_encoder.resize_token_embeddings(len(tokenizer))
+
+  # get the id for the token and assign the embeds
+  token_id = tokenizer.convert_tokens_to_ids(token)
+  text_encoder.get_input_embeddings().weight.data[token_id] = embeds
+def dummy(images, **kwargs):
+    return images, False
+def generate_diff(prompt, num_samples, num_rows, steps, scale):
+    pipe = StableDiffusionPipeline.from_pretrained(
+        pretrained_model_name_or_path,
+        torch_dtype=torch.float16,
+        text_encoder=text_encoder,
+        tokenizer=tokenizer,
+        use_auth_token=True,
+    ).to("cuda")
+
+    pipe.safety_checker = dummy
+    #prompt = "a grafitti in a favela wall with a <cat-toy> on it" #@param {type:"string"}
+
+    #num_samples = 2 #@param {type:"number"}
+    #num_rows = 2 #@param {type:"number"}
+
+    all_images = []
+    for _ in range(num_rows):
+        with autocast("cuda"):
+            images = pipe([prompt] * num_samples, num_inference_steps=steps, guidance_scale=scale)["sample"]
+            print(images)
+            all_images.append(images)
+            print(all_images)
+    return all_images
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--gpu", type=int, help="choose which GPU to use if you have multiple", default=0)
@@ -44,6 +100,7 @@ parser.add_argument("--cfg_path", type=str, help="Config Snapshots Path", defaul
 parser.add_argument("--outdir", type=str, help="Config Snapshots Path", default=None)
 parser.add_argument("--token", type=str, help="Config Snapshots Path", default=None)
 parser.add_argument("--load_p2p", type=bool, help="Config Snapshots Path", default=None)
+parser.add_argument("--embeds", type=bool, help="Config Snapshots Path", default=None)
 
 opt = parser.parse_args()
 
@@ -99,6 +156,28 @@ from diffusers import LMSDiscreteScheduler
 from tqdm.auto import tqdm
 from torch import autocast
 from difflib import SequenceMatcher
+
+
+if opt.embeds:
+    pretrained_model_name_or_path = "CompVis/stable-diffusion-v1-4" #@param {type:"string"}
+    learned_embeds_path = "/content/downloaded_embedding/learned_embeds.bin"
+    with open('/content/downloaded_embedding/token_identifier.txt', 'r') as file:
+        placeholder_token_string = file.read()
+    tokenizer = CLIPTokenizer.from_pretrained(
+                pretrained_model_name_or_path,
+                subfolder="tokenizer",
+                use_auth_token=opt.token)
+
+    text_encoder = CLIPTextModel.from_pretrained(
+                    pretrained_model_name_or_path,
+                    subfolder="text_encoder",
+                    use_auth_token=opt.token)
+
+
+    load_learned_embed_in_clip(learned_embeds_path, text_encoder, tokenizer)
+
+    print("inception")
+
 
 def init_attention_weights(weight_tuples):
     tokens_length = clip_tokenizer.model_max_length
@@ -1394,18 +1473,20 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
                 for image in init_array: # iterates the init images
                     b_init_image = image
                     print(f'USING SEED FOR BATCH:{b_seed}')
-
-                    results = generate(b_prompts[iprompt], b_name, b_outdir,
-                                       b_GFPGAN, b_bg_upsampling, b_upscale,
-                                       b_W, b_H, b_steps, b_scale, b_seed,
-                                       b_sampler, b_n_batch, b_n_samples, b_ddim_eta,
-                                       b_use_init, b_init_image,
-                                       b_init_sample, b_strength,
-                                       b_use_mask, b_mask_file,
-                                       b_mask_contrast_adjust,
-                                       b_mask_brightness_adjust, b_invert_mask,
-                                       dynamic_threshold=None, static_threshold=None, C=4, f=8, init_c=None)
-
+                    if b_sampler != "diffusers":
+                        results = generate(b_prompts[iprompt], b_name, b_outdir,
+                                           b_GFPGAN, b_bg_upsampling, b_upscale,
+                                           b_W, b_H, b_steps, b_scale, b_seed,
+                                           b_sampler, b_n_batch, b_n_samples, b_ddim_eta,
+                                           b_use_init, b_init_image,
+                                           b_init_sample, b_strength,
+                                           b_use_mask, b_mask_file,
+                                           b_mask_contrast_adjust,
+                                           b_mask_brightness_adjust, b_invert_mask,
+                                           dynamic_threshold=None, static_threshold=None, C=4, f=8, init_c=None)
+                    else:
+                        images = generate_diff(b_prompts[iprompt], b_n_samples, b_n_batch, b_steps, b_scale)
+                        results = images[0]
 
                     for image in results:
                         #all_images.append(results[image])
@@ -1418,6 +1499,8 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
 
                             image.save(os.path.join(b_outdir, b_filename))
                             b_outputs.append(b_fpath)
+                            yield gr.update(value=b_outputs), gr.update(visible=False)
+
                         #if b_display_samples:
                         #    display.display(image)
                         index += 1
@@ -1480,7 +1563,7 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
 
         torch_gc()
 
-        return b_outputs, gr.Dropdown.update(choices=batch_path_list)
+        yield gr.update(value=b_outputs), gr.Dropdown.update(visible=True, choices=batch_path_list)
 
 #Animation by Deforum
 
@@ -2267,6 +2350,9 @@ if opt.load_p2p:
     print(f'I      -  Prompt to Prompt Image Editor     I')
 if not opt.no_var:
     print(f'I      -  Variations model                  I')
+if not opt.embeds:
+    print(f'I      -  Concept Embeddings                I')
+
 print(f'I                                           I')
 print(f'I-------------------------------------------I')
 
@@ -2419,7 +2505,7 @@ with demo:
                     b_init_img_array = gr.Image(visible=False)
 
                     b_sampler = gr.Radio(label='Sampler',
-                                        choices=['klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim'],
+                                        choices=['diffusers','klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim'],
                                         value='klms',
                                         interactive=True)#sampler
                     b_prompts = gr.Textbox(label='Prompts',
