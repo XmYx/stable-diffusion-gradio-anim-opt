@@ -18,7 +18,7 @@ from einops import rearrange, repeat
 from itertools import islice
 from omegaconf import OmegaConf
 import PIL
-from PIL import Image
+from PIL import Image, ImageDraw
 from pytorch_lightning import seed_everything
 from skimage.exposure import match_histograms
 from torchvision.utils import make_grid as mkgrid
@@ -65,6 +65,8 @@ def load_learned_embed_in_clip(learned_embeds_path, text_encoder, tokenizer, tok
   text_encoder.get_input_embeddings().weight.data[token_id] = embeds
 def dummy(images, **kwargs):
     return images, False
+
+
 def generate_diff(prompt, num_samples, num_rows, steps, scale):
     pipe = StableDiffusionPipeline.from_pretrained(
         pretrained_model_name_or_path,
@@ -112,7 +114,8 @@ sys.path.extend([
     '/content/pytorch3d-lite',
     '/content/AdaBins',
     '/content/MiDaS',
-    '/content/soup'
+    '/content/soup',
+    '/content/Real-ESRGAN'
 ])
 
 import py3d_tools as p3d
@@ -127,9 +130,222 @@ from midas.dpt_depth import DPTDepthModel
 from midas.transforms import Resize, NormalizeImage, PrepareForNet
 from difflib import SequenceMatcher
 from diffusers import LMSDiscreteScheduler
+from realesrgan import RealESRGANer
+
 
 import nsp_pantry
 from nsp_pantry import nspterminology, nsp_parse
+
+def load_RealESRGAN(model_name: str, checking = False):
+    from basicsr.archs.rrdbnet_arch import RRDBNet
+    RealESRGAN_models = {
+        'RealESRGAN_x4plus': RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4),
+        'RealESRGAN_x4plus_anime_6B': RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=6, num_grow_ch=32, scale=4)
+    }
+    RealESRGAN_dir = '/content/Real-ESRGAN'
+    model_path = os.path.join(RealESRGAN_dir, 'experiments/pretrained_models', model_name + '.pth')
+    if not os.path.isfile(model_path):
+        raise Exception(model_name+".pth not found at path "+model_path)
+    if checking == True:
+        return True
+    sys.path.append(os.path.abspath(RealESRGAN_dir))
+    from realesrgan import RealESRGANer
+
+    #if opt.esrgan_cpu or opt.extra_models_cpu:
+    #    instance = RealESRGANer(scale=2, model_path=model_path, model=RealESRGAN_models[model_name], pre_pad=0, half=False) # cpu does not support half
+    #    instance.device = torch.device('cpu')
+    #    instance.model.to('cpu')
+    #elif opt.extra_models_gpu:
+    #    instance = RealESRGANer(scale=2, model_path=model_path, model=RealESRGAN_models[model_name], pre_pad=0, half=not opt.no_half, gpu_id=opt.esrgan_gpu)
+    #else:
+    instance = RealESRGANer(scale=2, model_path=model_path, model=RealESRGAN_models[model_name], pre_pad=0, half=True)
+    instance.model.name = model_name
+    print("ESRGAN Loaded...")
+    return instance
+
+RealESRGAN = load_RealESRGAN('RealESRGAN_x4plus')
+
+def convert_pil_img(image):
+    w, h = image.size
+    w, h = map(lambda x: x - x % 32, (w, h))  # resize to integer multiple of 32
+    image = image.resize((w, h), resample=PIL.Image.Resampling.LANCZOS)
+    image = np.array(image).astype(np.float16) / 255.0
+    image = image[None].transpose(0, 3, 1, 2)
+    image = torch.from_numpy(image)
+    return 2.*image - 1.
+
+def go_big(image, prompts, passes, overlap, detail_steps, detail_scale, strength, outdir, W, H):
+
+    passes = int(passes)
+    W = int(W)
+    H = int(H)
+    overlap = int(overlap)
+    detail_steps = int(detail_steps)
+
+    if opt.gobigsampler == 'plms':
+      ddim_eta = 0
+    if opt.gobigsampler == 'plms':
+        sampler = PLMSSampler(model)
+    else:
+        sampler = DDIMSampler(model)
+
+    model_wrap = CompVisDenoiser(model)
+
+
+    mask = None
+
+    dynamic_threshold = None
+    static_threshold = None
+
+
+
+
+
+  #result = processRealESRGAN(image,)
+    outdir = f'{opt.outdir}/_GoBig'
+    print(f'Running GoBig, Passes: {passes}')
+    for _ in range(passes):
+              #realesrgan2x(opt.realesrgan, os.path.join(sample_path, f"{base_filename}.png"), os.path.join(sample_path, f"{base_filename}u.png"))
+
+
+
+              batch_size = 1
+              precision_scope = autocast
+              img = processRealESRGAN(img,)
+              img.save(f'{outdir}/gobigsource.png')
+              #base_filename = f"{base_filename}u"
+
+              source_image = Image.open(f'{outdir}/gobigsource.png')
+              og_size = (H, W) #H W
+              slices, _ = grid_slice(source_image, overlap, og_size, False)
+
+              betterslices = []
+              for _, chunk_w_coords in tqdm(enumerate(slices), "Slices"):
+                  chunk, coord_x, coord_y = chunk_w_coords
+
+                  #init_image = load_img(chunk, shape=(W, H)).to(device)
+                  init_image = convert_pil_img(chunk).to(device)
+                  #init_image = sample_from_cv2(chunk)
+                  #init_image = init_image.half().to(device)
+                  init_image = repeat(init_image, '1 ... -> b ...', b=batch_size)
+                  init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_image))  # move to latent space
+                  if opt.gobigsampler in ['plms','ddim']:
+                      sampler.make_schedule(ddim_num_steps=detail_steps, ddim_eta=0, verbose=False)
+
+                  assert 0. <= strength <= 1., 'can only work with strength in [0.0, 1.0]'
+                  t_enc = int(strength * detail_steps)
+
+                  k_sigmas = model_wrap.get_sigmas(detail_steps)
+                  k_sigmas = k_sigmas[len(k_sigmas)-t_enc-1:]
+
+
+                  callback = make_callback(sampler_name=opt.gobigsampler,
+                        dynamic_threshold=dynamic_threshold,
+                        static_threshold=static_threshold,
+                        mask=mask,
+                        init_latent=init_latent,
+                        sigmas=k_sigmas,
+                        sampler=sampler)
+
+
+
+
+                  with torch.inference_mode():
+                      with precision_scope("cuda"):
+                          with model.ema_scope():
+                              for prompts in prompts:
+                                    uc = None
+                                    if detail_scale != 1.0:
+                                      uc = model.get_learned_conditioning(batch_size * [""])
+                                    if isinstance(prompts, tuple):
+                                      prompts = list(prompts)
+                                    c = model.get_learned_conditioning(prompts)
+
+                                    #
+                                    if opt.gobigsampler in ["klms","dpm2","dpm2_ancestral","heun","euler","euler_ancestral"]:
+                                        shape = [4, H // 8, W // 8]
+                                        samples = sampler_fn(
+                                            c=c,
+                                            uc=uc,
+                                            shape=shape,
+                                            steps=detail_steps,
+                                            use_init=True,
+                                            n_samples=1,
+                                            samplern=opt.gobigsampler,
+                                            scale=detail_scale,
+                                            model_wrap=model_wrap,
+                                            init_latent=init_latent,
+                                            t_enc=t_enc,
+                                            device=device,
+                                            cb=callback)
+                                    else:
+                                        # samplern == 'plms' or samplern == 'ddim':
+                                        z_enc = sampler.stochastic_encode(init_latent, torch.tensor([t_enc]*batch_size).to(device))
+
+                                        if opt.gobigsampler == 'ddim':
+                                            samples = sampler.decode(z_enc,
+                                                                     c,
+                                                                     t_enc,
+                                                                     unconditional_guidance_scale=detail_scale,
+                                                                     unconditional_conditioning=uc,
+                                                                     img_callback=callback)
+                                        elif opt.gobigsampler == 'plms': # no "decode" function in plms, so use "sample"
+                                            shape = [4, H // 8, W // 8]
+                                            samples, _ = sampler.sample(S=steps,
+                                                                            conditioning=c,
+                                                                            batch_size=1,
+                                                                            shape=shape,
+                                                                            verbose=False,
+                                                                            unconditional_guidance_scale=detail_scale,
+                                                                            unconditional_conditioning=uc,
+                                                                            eta=ddim_eta,
+                                                                            x_T=z_enc,
+                                                                            img_callback=callback)
+
+
+                                        # encode (scaled latent)
+                                        # decode it
+                                        #samples = sampler.decode(z_enc, c, t_enc, unconditional_guidance_scale=detail_scale,
+                                        #              unconditional_conditioning=uc,)
+
+                                        x_samples = model.decode_first_stage(samples)
+                                        x_samples = torch.clamp((x_samples + 1.0) / 2.0, min=0.0, max=1.0)
+
+                                        for x_sample in x_samples:
+                                            x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
+                                            resultslice = Image.fromarray(x_sample.astype(np.uint8)).convert('RGBA')
+                                            betterslices.append((resultslice.copy(), coord_x, coord_y))
+
+              alpha = Image.new('L', og_size, color=0xFF)
+              alpha_gradient = ImageDraw.Draw(alpha)
+              a = 0
+              i = 0
+              #overlap = opt.gobig_overlap
+              shape = (og_size, (0,0))
+              while i < overlap:
+                  alpha_gradient.rectangle(shape, fill = a)
+                  a += 4
+                  i += 1
+                  shape = ((og_size[0] - i, og_size[1]- i), (i,i))
+              mask = Image.new('RGBA', og_size, color=0)
+              mask.putalpha(alpha)
+              finished_slices = []
+              for betterslice, x, y in betterslices:
+                  finished_slice = addalpha(betterslice, mask)
+                  finished_slices.append((finished_slice, x, y))
+              sp = sanitize(prompts)
+              # # Once we have all our images, use grid_merge back onto the source, then save
+              final_output = grid_merge(source_image.convert("RGBA"), finished_slices).convert("RGB")
+              final_output.save(os.path.join(outdir, f"{sp}_GoBig_Test_{random.randint(10000, 99999)}_001d.png"))
+              #base_filename = f"{base_filename}d"
+
+              torch.cuda.empty_cache()
+              gc.collect()
+
+              #put_watermark(final_output, wm_encoder)
+              #final_output.save(os.path.join(outdir, f"{base_filename}.png"))
+              return final_output
+
 
 if opt.load_p2p == True:
     model_path_clip = "openai/clip-vit-large-patch14"
@@ -177,6 +393,140 @@ if opt.embeds:
     load_learned_embed_in_clip(learned_embeds_path, text_encoder, tokenizer)
 
     print("inception")
+
+#GoBig functions
+def addalpha(im, mask):
+    imr, img, imb, ima = im.split()
+    mmr, mmg, mmb, mma = mask.split()
+    im = Image.merge('RGBA', [imr, img, imb, mma])  # we want the RGB from the original, but the transparency from the mask
+    return(im)
+
+# Alternative method composites a grid of images at the positions provided
+def grid_merge(source, slices):
+    source.convert("RGBA")
+    for slice, posx, posy in slices: # go in reverse to get proper stacking
+        source.alpha_composite(slice, (posx, posy))
+    return source
+
+def grid_coords(target, original, overlap):
+    #generate a list of coordinate tuples for our sections, in order of how they'll be rendered
+    #target should be the size for the gobig result, original is the size of each chunk being rendered
+    center = []
+    target_x, target_y = target
+    center_x = int(target_x / 2)
+    center_y = int(target_y / 2)
+    original_x, original_y = original
+    x = center_x - int(original_x / 2)
+    y = center_y - int(original_y / 2)
+    center.append((x,y)) #center chunk
+    uy = y #up
+    uy_list = []
+    dy = y #down
+    dy_list = []
+    lx = x #left
+    lx_list = []
+    rx = x #right
+    rx_list = []
+    while uy > 0: #center row vertical up
+        uy = uy - original_y + overlap
+        uy_list.append((lx, uy))
+    while (dy + original_y) <= target_y: #center row vertical down
+        dy = dy + original_y - overlap
+        dy_list.append((rx, dy))
+    while lx > 0:
+        lx = lx - original_x + overlap
+        lx_list.append((lx, y))
+        uy = y
+        while uy > 0:
+            uy = uy - original_y + overlap
+            uy_list.append((lx, uy))
+        dy = y
+        while (dy + original_y) <= target_y:
+            dy = dy + original_y - overlap
+            dy_list.append((lx, dy))
+    while (rx + original_x) <= target_x:
+        rx = rx + original_x - overlap
+        rx_list.append((rx, y))
+        uy = y
+        while uy > 0:
+            uy = uy - original_y + overlap
+            uy_list.append((rx, uy))
+        dy = y
+        while (dy + original_y) <= target_y:
+            dy = dy + original_y - overlap
+            dy_list.append((rx, dy))
+    # calculate a new size that will fill the canvas, which will be optionally used in grid_slice and go_big
+    last_coordx, last_coordy = dy_list[-1:][0]
+    render_edgey = last_coordy + original_y # outer bottom edge of the render canvas
+    render_edgex = last_coordx + original_x # outer side edge of the render canvas
+    scalarx = render_edgex / target_x
+    scalary = render_edgey / target_y
+    if scalarx <= scalary:
+        new_edgex = int(target_x * scalarx)
+        new_edgey = int(target_y * scalarx)
+    else:
+        new_edgex = int(target_x * scalary)
+        new_edgey = int(target_y * scalary)
+    # now put all the chunks into one master list of coordinates (essentially reverse of how we calculated them so that the central slices will be on top)
+    result = []
+    for coords in dy_list[::-1]:
+        result.append(coords)
+    for coords in uy_list[::-1]:
+        result.append(coords)
+    for coords in rx_list[::-1]:
+        result.append(coords)
+    for coords in lx_list[::-1]:
+        result.append(coords)
+    result.append(center[0])
+    return result, (new_edgex, new_edgey)
+
+
+def processRealESRGAN(image):
+
+        imgproc_realesrgan_model_name = 'RealESRGAN_x4plus'
+
+        if 'x2' in imgproc_realesrgan_model_name:
+            # downscale to 1/2 size
+            modelMode = imgproc_realesrgan_model_name.replace('x2','x4')
+        else:
+            modelMode = imgproc_realesrgan_model_name
+        image = image.convert("RGB")
+        RealESRGAN = load_RealESRGAN(modelMode)
+        result, res = RealESRGAN.enhance(np.array(image, dtype=np.uint8))
+        result = Image.fromarray(result)
+        if 'x2' in imgproc_realesrgan_model_name:
+            # downscale to 1/2 size
+            result = result.resize((result.width//2, result.height//2), LANCZOS)
+
+        return result
+def get_resampling_mode():
+    try:
+        from PIL import __version__, Image
+        major_ver = int(__version__.split('.')[0])
+        if major_ver >= 9:
+            return Image.Resampling.LANCZOS
+        else:
+            return Image.LANCZOS
+    except Exception as ex:
+        return 1  # 'Lanczos' irrespective of version.
+get_resampling_mode()
+
+# Chop our source into a grid of images that each equal the size of the original render
+def grid_slice(source, overlap, og_size, maximize=False):
+    width, height = og_size # size of the slices to be rendered
+    coordinates, new_size = grid_coords(source.size, og_size, overlap)
+    if maximize == True:
+        source = source.resize(new_size, get_resampling_mode()) # minor concern that we're resizing twice
+        coordinates, new_size = grid_coords(source.size, og_size, overlap) # re-do the coordinates with the new canvas size
+    # loc_width and loc_height are the center point of the goal size, and we'll start there and work our way out
+    slices = []
+    for coordinate in coordinates:
+        x, y = coordinate
+        slices.append(((source.crop((x, y, x+width, y+height))), x, y))
+    global slices_todo
+    slices_todo = len(slices) - 1
+    return slices, new_size
+
 
 
 def init_attention_weights(weight_tuples):
@@ -557,9 +907,9 @@ def sanitize(prompt):
     whitelist = set('abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ')
     tmp = ''.join(filter(whitelist.__contains__, prompt))
 
-    whitelist = set(string.ascii_lowercase + string.digits)
-    name = ''.join(c for c in tmp if c in whitelist)
-    return '_'.join(name.split(" "))
+    #whitelist = set(string.ascii_lowercase + string.digits)
+    #name = ''.join(c for c in tmp if c in whitelist)
+    return '_'.join(tmp.split(" "))
 
 def download_depth_models():
     def wget(url, outputdir):
@@ -1134,6 +1484,9 @@ def parse_key_frames(string, prompt_parser=None):
 #Image generator
 
 def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, scale, seed, samplern, n_batch, n_samples, ddim_eta, use_init, init_image, init_sample, strength, use_mask, mask_file, mask_contrast_adjust, mask_brightness_adjust, invert_mask, dynamic_threshold, static_threshold, C, f, init_c, return_latent=False, return_sample=False, return_c=False):
+    opt.H = H
+    opt.W = W
+
     precision = "autocast"
     seed_everything(seed)
     os.makedirs(outdir, exist_ok=True)
@@ -1277,15 +1630,29 @@ def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, 
                     for x_sample in x_samples:
                         x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
                         image = Image.fromarray(x_sample.astype(np.uint8))
+                        if opt.pre_gobig_gfpgan:
+                            image = FACE_RESTORATION(image, bg_upsampling, upscale).astype(np.uint8)
+                            image = Image.fromarray(image)
+
+                            opt.W = opt.W * upscale
+                            opt.H = opt.H * upscale
+                        if opt.gobig:
+
+                            image = go_big(image, prompts, opt.g_passes, opt.overlap, opt.gobigsteps, opt.gobigscale, opt.gobigstrength, outdir, opt.W, opt.H)
+
                         if GFPGAN:
                             image = FACE_RESTORATION(image, bg_upsampling, upscale).astype(np.uint8)
                             image = Image.fromarray(image)
                         else:
                             image = image
 
-
                         results.append(image)
-    return results
+
+
+    print(f'image: {image}')
+
+    print(f'results: {results}')
+    yield results
 
 #Variations by Justinpinkey
 
@@ -1393,11 +1760,13 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
               b_seed, b_sampler, b_save_grid, b_save_settings, b_save_samples,
               b_n_batch, b_n_samples, b_ddim_eta, b_use_init, b_init_image,
               b_strength, b_make_grid, b_init_img_array, b_use_mask,
-              b_mask_file, b_invert_mask, b_mask_brightness_adjust, b_mask_contrast_adjust):
+              b_mask_file, b_invert_mask, b_mask_brightness_adjust, b_mask_contrast_adjust,
+              b_gobig, b_passes, b_overlap, b_detail_steps, b_detail_scale, b_g_strength, b_gobigsampler, b_pregobig):
         timestring = time.strftime('%Y%m%d%H%M%S')
 
 
         model.to('cuda')
+
         #b_prompts = prompts
 
         b_prompts = list(b_prompts.split("\n"))
@@ -1423,7 +1792,21 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
         f = 8
         b_seed_list = []
         b_seed_list.append(b_seed)
-
+        if b_gobig:
+            if b_pregobig:
+                opt.pre_gobig_gfpgan = True
+            else:
+                opt.pre_gobig_gfpgan = False
+            opt.gobig = True
+            opt.g_passes = b_passes
+            opt.overlap = b_overlap
+            opt.gobigsteps = b_detail_steps
+            opt.gobigscale = b_detail_scale
+            opt.gobigstrength = b_g_strength
+            opt.gobigsampler = b_gobigsampler
+        else:
+            opt.gobig = False
+            opt.pre_gobig_gfpgan = False
         if b_init_img_array != None:
             initdir = f'{b_outdir}/init'
             os.makedirs(initdir, exist_ok=True)
@@ -1471,12 +1854,14 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
                 #print(f"Batch {batch_index+1} of {b_n_batch}")
 
                 for image in init_array: # iterates the init images
+                    u_seed = seed_everything(b_seed)
                     b_init_image = image
-                    print(f'USING SEED FOR BATCH:{b_seed}')
+                    print(f'Seed:{u_seed}')
                     if b_sampler != "diffusers":
+
                         results = generate(b_prompts[iprompt], b_name, b_outdir,
                                            b_GFPGAN, b_bg_upsampling, b_upscale,
-                                           b_W, b_H, b_steps, b_scale, b_seed,
+                                           b_W, b_H, b_steps, b_scale, u_seed,
                                            b_sampler, b_n_batch, b_n_samples, b_ddim_eta,
                                            b_use_init, b_init_image,
                                            b_init_sample, b_strength,
@@ -1488,25 +1873,31 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
                         images = generate_diff(b_prompts[iprompt], b_n_samples, b_n_batch, b_steps, b_scale)
                         results = images[0]
 
+
                     for image in results:
                         #all_images.append(results[image])
                         if b_make_grid:
                             all_images.append(T.functional.pil_to_tensor(image))
                         if b_save_samples:
 
-                            b_filename = (f"{b_sanitized}_{index:05}.png")
+                            b_filename = (f"{b_sanitized}_{u_seed}_{index:05}.png")
                             b_fpath = (f"{b_outdir}/{b_filename}")
+                            if type(image) == list:
+                              image = image[0]
+                            print(f'image before saving: {image}')
+                            print(f'image type before saving: {type(image)}')
 
                             image.save(os.path.join(b_outdir, b_filename))
                             b_outputs.append(b_fpath)
                             yield gr.update(value=b_outputs), gr.update(visible=False)
 
-                        #if b_display_samples:
-                        #    display.display(image)
-                        index += 1
                     if b_seed_behavior != 'fixed':
                         b_seed = next_seed(b_seed, b_seed_behavior)
                         b_seed_list.append(b_seed)
+
+                        #if b_display_samples:
+                        #    display.display(image)
+                        index += 1
 
         print(f"Filepath List: {b_outputs}")
 
@@ -1562,8 +1953,12 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
 
 
         torch_gc()
+        log = (f'Seeds Used:\n{b_seed_list}')
+        opt.gobig = False
+        print(f'image before saving: {image}')
+        print(f'image type before saving: {type(image)}')
 
-        yield gr.update(value=b_outputs), gr.Dropdown.update(visible=True, choices=batch_path_list)
+        yield gr.update(value=b_outputs), gr.Dropdown.update(visible=True, choices=batch_path_list), gr.update(value=log)
 
 #Animation by Deforum
 
@@ -1641,6 +2036,7 @@ def anim(animation_mode, animation_prompts, key_frames,
         resume_from_timestring, resume_timestring, make_grid, inPaint, b_use_mask,
         b_mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust,
         use_seq, seqlist, seqname):
+            opt.pre_gobig_gfpgan = False
             img = np.random.random((600, 600, 3))
             opt.outdir = outdir
             model.to('cuda')
@@ -2007,6 +2403,7 @@ def anim(animation_mode, animation_prompts, key_frames,
                     mask_file = ""
                     if seed == -1:
                         seed = random.randint(0, 2**32)
+                        anim_args.seed = seed
                     os.makedirs(mp4_p, exist_ok=True)
                     if use_seq == True:
                         outdir =f'{outdir}/_anim_stills/{seqname}_{timestring}'
@@ -2220,7 +2617,7 @@ def anim(animation_mode, animation_prompts, key_frames,
 torch_gc()
 inPaint=None
 cfg_snapshots = []
-demo = gr.Blocks()
+demo = gr.Blocks('SD 1.4 - Anim 0.5')
 
 
 
@@ -2501,6 +2898,7 @@ with demo:
             with gr.Row():
                 with gr.Column():
                     with gr.Row():
+                        stop_batch_btn = gr.Button('stop')
                         batch_path_to_view = gr.Dropdown(label='Images', choices=batch_pathlist)
                     b_init_img_array = gr.Image(visible=False)
 
@@ -2526,10 +2924,26 @@ with demo:
                     b_save_grid = gr.Checkbox(label='Save Grid', value=False, visible=True)
                     b_mask_file = gr.Textbox(label='Mask File', value='', visible=True) #
                 with gr.Column():
+                    with gr.Accordion('Upscalers'):
+                        with gr.Row():
+                            b_pregobig = gr.Checkbox(label = 'Pre-GoBig GFPGAN', value=False)
+                            b_gobig = gr.Checkbox(label = 'GoBig', value=False)
+                            b_GFPGAN = gr.Checkbox(label='GFPGAN, Face Resto, Upscale', value=False)
+                            b_bg_upsampling = gr.Checkbox(label='BG Enhancement', value=False)
+                        b_gobigsampler = gr.Radio(label='Sampler',
+                                            choices=['klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim'],
+                                            value='klms',
+                                            interactive=True)#sampler
+
+                        b_passes = gr.Slider(minimum=1, maximum=100, step=1, label='GoBig Passes', value=1, visible=True)
+                        b_overlap = gr.Slider(minimum=1, maximum=512, step=1, label='GoBig Overlap', value=128, visible=True)
+                        b_detail_steps = gr.Slider(minimum=1, maximum=250, step=1, label='GoBig Steps', value=50, visible=True)
+                        b_detail_scale = gr.Slider(minimum=0, maximum=100, step=1, label='GoBig Detail Scale', value=10, visible=True)
+                        b_g_strength = gr.Slider(minimum=0, maximum=1, step=0.1, label='GoBig Strength', value=0.3, visible=True)
+                        b_upscale = gr.Slider(minimum=1, maximum=8, step=1, label='GFPGAN Scale (1x = Off)', value=1, interactive=True)
+
                     batch_outputs = gr.Gallery()
-                    b_GFPGAN = gr.Checkbox(label='GFPGAN, Face Resto, Upscale', value=False)
-                    b_bg_upsampling = gr.Checkbox(label='BG Enhancement', value=False)
-                    b_upscale = gr.Slider(minimum=1, maximum=8, step=1, label='Upscaler, 1 to turn off', value=1, interactive=True)
+                    b_log = gr.Textbox(lines=4)
                     b_W = gr.Slider(minimum=256, maximum=8192, step=64, label='Width', value=512, interactive=True)#width
                     b_H = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)#height
                     b_steps = gr.Slider(minimum=1, maximum=300, step=1, label='Steps', value=100, interactive=True)#steps
@@ -2541,7 +2955,7 @@ with demo:
                       b_mask_brightness_adjust = gr.Slider(minimum=0, maximum=2, step=0.1, label='Mask Brightness', value=1.0, interactive=True)
                       b_mask_contrast_adjust = gr.Slider(minimum=0, maximum=2, step=0.1, label='Mask Contrast', value=1.0, interactive=True)
                     b_invert_mask = gr.Checkbox(label='Invert Mask', value=True, interactive=True) #@param {type:"boolean"}
-
+                    b_console = gr.Interface(lambda cmd:subprocess.run([cmd], capture_output=True, shell=True).stdout.decode('utf-8').strip(), "text", "text")
         with gr.TabItem('InPainting'):
             with gr.Row():
                 with gr.Column():
@@ -2569,13 +2983,31 @@ with demo:
 
                 with gr.Column():
                     inPainted = gr.Gallery()
+                    i_log = gr.Textbox()
                     i_sampler = gr.Radio(label='Sampler',
                                      choices=['klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral', 'ddim'],
                                      value='klms', interactive=True)#sampler
-                    with gr.Row():
-                        i_GFPGAN = gr.Checkbox(label='GFPGAN, Upscaler', value=False)
-                        i_bg_upsampling = gr.Checkbox(label='BG Enhancement', value=False)
-                        i_upscale = gr.Slider(minimum=1, maximum=8, step=1, label='Upscaler, 1 to turn off', value=1, interactive=True)
+                    with gr.Accordion('Upscalers'):
+                        with gr.Row():
+                            i_pregobig = gr.Checkbox(label = 'Pre-GoBig GFPGAN', value=False)
+                            i_gobig = gr.Checkbox(label = 'GoBig', value=False)
+                            i_GFPGAN = gr.Checkbox(label='GFPGAN, Face Resto, Upscale', value=False)
+                            i_bg_upsampling = gr.Checkbox(label='BG Enhancement', value=False)
+                        i_gobigsampler = gr.Radio(label='Sampler',
+                                            choices=['klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim'],
+                                            value='klms',
+                                            interactive=True)#sampler
+
+                        i_passes = gr.Slider(minimum=1, maximum=100, step=1, label='GoBig Passes', value=1, visible=True)
+                        i_overlap = gr.Slider(minimum=1, maximum=512, step=1, label='GoBig Overlap', value=128, visible=True)
+                        i_detail_steps = gr.Slider(minimum=1, maximum=250, step=1, label='GoBig Steps', value=50, visible=True)
+                        i_detail_scale = gr.Slider(minimum=0, maximum=100, step=1, label='GoBig Detail Scale', value=10, visible=True)
+                        i_g_strength = gr.Slider(minimum=0, maximum=1, step=0.1, label='GoBig Strength', value=0.3, visible=True)
+                        i_upscale = gr.Slider(minimum=1, maximum=8, step=1, label='GFPGAN Scale (1x = Off)', value=1, interactive=True)
+
+
+
+
                     with gr.Row():
                         i_W = gr.Slider(minimum=256, maximum=8192, step=64, label='Width', value=512, interactive=True)#width
                         i_H = gr.Slider(minimum=256, maximum=8192, step=64, label='Height', value=512, interactive=True)#height
@@ -2669,7 +3101,8 @@ with demo:
                       gr.Markdown(value=soup_help1)
                   with gr.Column():
                       gr.Markdown(value=soup_help2)
-
+        for event in [stop_batch_btn.click]:
+          event(stop, [], [])
     def saveSnapshot(new_k_prompts, animation_mode,
                         strength, max_frames, border, key_frames,
                         interp_spline, angle, zoom, translation_x,
@@ -2746,7 +3179,9 @@ with demo:
                     b_seed, b_sampler, b_save_grid, b_save_settings, b_save_samples,
                     b_n_batch, b_n_samples, b_ddim_eta, b_use_init, b_init_image,
                     b_strength, b_make_grid, b_init_img_array, b_use_mask,
-                    b_mask_file, b_invert_mask, b_mask_brightness_adjust, b_mask_contrast_adjust]
+                    b_mask_file, b_invert_mask, b_mask_brightness_adjust, b_mask_contrast_adjust,
+                    b_gobig, b_passes, b_overlap, b_detail_steps, b_detail_scale, b_g_strength, b_gobigsampler, b_pregobig]
+
 
 
 
@@ -2755,7 +3190,8 @@ with demo:
                     i_seed, i_sampler, i_save_grid, i_save_settings, i_save_samples,
                     i_n_batch, i_n_samples, i_ddim_eta, i_use_init, i_init_image,
                     i_strength, i_make_grid, i_init_img_array, i_use_mask,
-                    i_mask_file, i_invert_mask, i_mask_brightness_adjust, i_mask_contrast_adjust]
+                    i_mask_file, i_invert_mask, i_mask_brightness_adjust, i_mask_contrast_adjust,
+                    i_gobig, i_passes, i_overlap, i_detail_steps, i_detail_scale, i_g_strength, i_gobigsampler, i_pregobig]
 
     kb_inputs = [kb_string, kb_frame, kb_value]
     kb_outputs = [kb_string, movement_settings]
@@ -2785,8 +3221,8 @@ with demo:
 
 
 
-    batch_outs = [batch_outputs, batch_path_to_view]
-    inPaint_outputs = [inPainted]
+    batch_outs = [batch_outputs, batch_path_to_view, b_log]
+    inPaint_outputs = [inPainted, i_path_to_view, i_log]
 
     add_cfg_inputs = [cfg_seq_snapshots, sequence]
     add_cfg_outputs = [sequence, sequencer_settings]
