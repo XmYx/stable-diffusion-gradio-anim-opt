@@ -1652,7 +1652,7 @@ def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, 
     print(f'image: {image}')
 
     print(f'results: {results}')
-    yield results
+    return results
 
 #Variations by Justinpinkey
 
@@ -1889,7 +1889,7 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
 
                             image.save(os.path.join(b_outdir, b_filename))
                             b_outputs.append(b_fpath)
-                            yield gr.update(value=b_outputs), gr.update(visible=False)
+                            yield gr.update(value=b_outputs), gr.update(visible=False), gr.update(value=f"Rendering image {iprompt} of {enumerate(b_prompts)}")
 
                     if b_seed_behavior != 'fixed':
                         b_seed = next_seed(b_seed, b_seed_behavior)
@@ -1955,9 +1955,6 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
         torch_gc()
         log = (f'Seeds Used:\n{b_seed_list}')
         opt.gobig = False
-        print(f'image before saving: {image}')
-        print(f'image type before saving: {type(image)}')
-
         yield gr.update(value=b_outputs), gr.Dropdown.update(visible=True, choices=batch_path_list), gr.update(value=log)
 
 #Animation by Deforum
@@ -2037,6 +2034,7 @@ def anim(animation_mode, animation_prompts, key_frames,
         b_mask_file, invert_mask, mask_brightness_adjust, mask_contrast_adjust,
         use_seq, seqlist, seqname):
             opt.pre_gobig_gfpgan = False
+            opt.gobig = False
             img = np.random.random((600, 600, 3))
             opt.outdir = outdir
             model.to('cuda')
@@ -2691,13 +2689,18 @@ def view_batch_file(inputfile):
   print(inputfile)
   print(type(inputfile))
   print(f'{opt.outdir}/_batch_images/{inputfile}')
-  return gr.update(value=[f'{opt.outdir}/_batch_images/{inputfile}'])
+  batch_pathlist=os.listdir(f'{opt.outdir}/_batch_images')
+
+  return gr.update(value=[f'{opt.outdir}/_batch_images/{inputfile}']), gr.update(choices=batch_pathlist)
+
 def view_editor_file(inputfile):
   print(inputfile)
   print(type(inputfile))
   path = f'{opt.outdir}/_batch_images/{inputfile}'
   image = Image.open(path).convert('RGB')
-  return gr.update(value=image)
+  batch_pathlist=os.listdir(f'{opt.outdir}/_batch_images')
+
+  return gr.update(value=image), gr.update(choices=batch_pathlist)
 
 
 
@@ -3264,10 +3267,10 @@ with demo:
     mp4_path_to_view.change(fn=view_video, inputs=view_inputs, outputs=view_outputs)
 
     batch_btn.click(fn=run_batch, inputs=batch_inputs, outputs=batch_outs)
-    batch_path_to_view.change(fn=view_batch_file, inputs=[batch_path_to_view], outputs=[batch_outputs])
+    batch_path_to_view.change(fn=view_batch_file, inputs=[batch_path_to_view], outputs=[batch_outputs, batch_path_to_view])
 
 
-    i_path_to_view.change(fn=view_editor_file, inputs=[i_path_to_view], outputs=[i_init_img_array])
+    i_path_to_view.change(fn=view_editor_file, inputs=[i_path_to_view], outputs=[i_init_img_array, i_path_to_view])
 
 
 class ServerLauncher(threading.Thread):
