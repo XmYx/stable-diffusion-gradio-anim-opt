@@ -1,5 +1,5 @@
 import json
-from pickle import FALSE
+#from pickle import FALSE
 import threading, asyncio, argparse, math, os, pathlib, shutil, subprocess, sys, time, string
 import cv2
 import numpy as np
@@ -100,7 +100,7 @@ parser.add_argument("--no_var", type=str, help="Variations Model Path", default=
 parser.add_argument("--var_ckpt", type=str, help="Variations Model Path", default=None)
 parser.add_argument("--cfg_path", type=str, help="Config Snapshots Path", default=None)
 parser.add_argument("--outdir", type=str, help="Config Snapshots Path", default=None)
-parser.add_argument("--token", type=str, help="Config Snapshots Path", default=None)
+parser.add_argument("--hfmodel", type=str, help="hfmodel_path", default=None)
 parser.add_argument("--load_p2p", type=bool, help="Config Snapshots Path", default=None)
 parser.add_argument("--embeds", type=bool, help="Config Snapshots Path", default=None)
 
@@ -131,6 +131,8 @@ from midas.transforms import Resize, NormalizeImage, PrepareForNet
 from difflib import SequenceMatcher
 from diffusers import LMSDiscreteScheduler
 from realesrgan import RealESRGANer
+import k_diffusion as K
+
 
 
 import nsp_pantry
@@ -197,6 +199,7 @@ def go_big(image, prompts, passes, overlap, detail_steps, detail_scale, strength
     dynamic_threshold = None
     static_threshold = None
 
+    img1 = None
 
 
 
@@ -211,8 +214,8 @@ def go_big(image, prompts, passes, overlap, detail_steps, detail_scale, strength
 
               batch_size = 1
               precision_scope = autocast
-              img = processRealESRGAN(img,)
-              img.save(f'{outdir}/gobigsource.png')
+              img1 = processRealESRGAN(image,)
+              img1.save(f'{outdir}/gobigsource.png')
               #base_filename = f"{base_filename}u"
 
               source_image = Image.open(f'{outdir}/gobigsource.png')
@@ -347,15 +350,16 @@ def go_big(image, prompts, passes, overlap, detail_steps, detail_scale, strength
               return final_output
 
 
-if opt.load_p2p == True:
+if opt.load_p2p:
     model_path_clip = "openai/clip-vit-large-patch14"
     clip_tokenizer = CLIPTokenizer.from_pretrained(model_path_clip)
     clip_model = CLIPModel.from_pretrained(model_path_clip, torch_dtype=torch.float16)
     clip = clip_model.text_model
-    model_path_diffusion = "CompVis/stable-diffusion-v1-4"
-    unet = UNet2DConditionModel.from_pretrained(model_path_diffusion, subfolder="unet", use_auth_token=opt.token, revision="fp16", torch_dtype=torch.float16)
-    vae = AutoencoderKL.from_pretrained(model_path_diffusion, subfolder="vae", use_auth_token=opt.token, revision="fp16", torch_dtype=torch.float16)
-    print('P2P models loaded')
+    model_path_diffusion = opt.hfmodel
+
+
+    unet = UNet2DConditionModel.from_pretrained(f"{model_path_diffusion}/unet", revision="fp16", torch_dtype=torch.float16)#use_auth_token=opt.token,
+    vae = AutoencoderKL.from_pretrained(f"{model_path_diffusion}/vae", revision="fp16", torch_dtype=torch.float16)#use_auth_token=opt.token,
 
     clip.to('cuda')
     unet.to('cuda')
@@ -375,24 +379,22 @@ from difflib import SequenceMatcher
 
 
 if opt.embeds:
-    pretrained_model_name_or_path = "CompVis/stable-diffusion-v1-4" #@param {type:"string"}
+    pretrained_model_name_or_path = opt.hfmodel #@param {type:"string"}
     learned_embeds_path = "/content/downloaded_embedding/learned_embeds.bin"
     with open('/content/downloaded_embedding/token_identifier.txt', 'r') as file:
         placeholder_token_string = file.read()
     tokenizer = CLIPTokenizer.from_pretrained(
                 pretrained_model_name_or_path,
-                subfolder="tokenizer",
-                use_auth_token=opt.token)
+                subfolder="tokenizer")
 
     text_encoder = CLIPTextModel.from_pretrained(
                     pretrained_model_name_or_path,
-                    subfolder="text_encoder",
-                    use_auth_token=opt.token)
+                    subfolder="text_encoder")
 
 
     load_learned_embed_in_clip(learned_embeds_path, text_encoder, tokenizer)
 
-    print("inception")
+    print("Learned Embeddings Loaded.")
 
 #GoBig functions
 def addalpha(im, mask):
@@ -1673,19 +1675,37 @@ def variations(input_im, outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_
     device_idx=0
 
 
+    if var_plms == 'k_dpm_2_a':
+        sampler_name = 'dpm_2_ancestral'
+    elif var_plms == 'k_dpm_2':
+        sampler_name = 'dpm_2'
+    elif var_plms == 'k_euler_a':
+        sampler_name = 'euler_ancestral'
+    elif var_plms == 'k_euler':
+        sampler_name = 'euler'
+    elif var_plms == 'k_heun':
+        sampler_name = 'heun'
+    elif var_plms == 'k_lms':
+        sampler_name = 'lms'
+
+
     device = 'cuda'
 
     input_im = transforms.ToTensor()(input_im).unsqueeze(0).to(device)
     input_im = input_im*2-1
     #input_im = load_im(im_path).to(device)
+    config_var = OmegaConf.load(config_var)
+    model_var = load_var_model_from_config(config_var, ckpt_var, device)
+    model_wrap = K.external.CompVisDenoiser(model_var)
+    sigma_min, sigma_max = model_wrap.sigmas[0].item(), model_wrap.sigmas[-1].item()
+    sigmas = model_wrap.get_sigmas(ddim_steps)
+    model_wrap_cfg = CFGDenoiser(model_wrap)
 
-
-
-    if plms:
-        sampler = PLMSSampler(model_var)
-        ddim_eta = 0.0
-    else:
-        sampler = DDIMSampler(model_var)
+    #if plms:
+    #    sampler = PLMSSampler(model_var)
+    #    ddim_eta = 0.0
+    #else:
+    #    sampler = DDIMSampler(model_var)
 
     os.makedirs(outpath, exist_ok=True)
 
@@ -1693,29 +1713,21 @@ def variations(input_im, outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_
     os.makedirs(sample_path, exist_ok=True)
     base_count = len(os.listdir(sample_path))
     paths = list()
-    x_samples_ddim = sample_model(input_im, model_var, sampler, precision, h, w, ddim_steps, n_samples, scale, ddim_eta)
+    x_samples_ddim = sample_model(input_im, model_var, sampler_name, precision, h, w, ddim_steps, n_samples, scale, ddim_eta, sigmas, model_wrap_cfg)
     for x_sample in x_samples_ddim:
         x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
-        img = Image.fromarray(x_sample.astype(np.uint8))
-        if v_GFPGAN:
-          img = FACE_RESTORATION(img, v_bg_upsampling, v_upscale).astype(np.uint8)
-          img = Image.fromarray(img)
-        else:
-          img = img
-        img.save(os.path.join(sample_path, f"{base_count:05}.png"))
+        Image.fromarray(x_sample.astype(np.uint8)).save(os.path.join(sample_path, f"{base_count:05}.png"))
         paths.append(f"{sample_path}/{base_count:05}.png")
+
         base_count += 1
-    del x_samples_ddim
-    del sampler
-    torch_gc()
     return paths
 
-def sample_model(input_im, model_var, sampler, precision, h, w, ddim_steps, n_samples, scale, ddim_eta):
-    model_var.to("cuda")
+def sample_model(input_im, model_var, sampler, precision, h, w, ddim_steps, n_samples, scale, ddim_eta, sigmas, model_wrap_cfg):
     precision_scope = autocast if precision=="autocast" else nullcontext
     with torch.no_grad():
-        with precision_scope('cuda'):
+        with precision_scope("cuda"):
             with model_var.ema_scope():
+
                 c = model_var.get_learned_conditioning(input_im).tile(n_samples,1,1)
 
                 if scale != 1.0:
@@ -1724,27 +1736,24 @@ def sample_model(input_im, model_var, sampler, precision, h, w, ddim_steps, n_sa
                     uc = None
 
                 shape = [4, h // 8, w // 8]
-                samples_ddim, _ = sampler.sample(S=ddim_steps,
-                                                 conditioning=c,
-                                                 batch_size=n_samples,
-                                                 shape=shape,
-                                                 verbose=False,
-                                                 unconditional_guidance_scale=scale,
-                                                 unconditional_conditioning=uc,
-                                                 eta=ddim_eta,
-                                                 x_T=None)
+
+
+                t_enc = int(0.5 * ddim_steps)
+
+
+
+                x = torch.randn([n_samples, *shape], device='cuda:0') * sigmas[0]
+
+                #x.to('cuda:0')
+                #sigmas.to('cuda:0')
+                #model_wrap_cfg.to('cuda:0')
+
+
+                                #x_samples_ddim = accelerator.gather(x_samples_ddim)
+                samples_ddim = K.sampling.__dict__[f'sample_{sampler}'](model_wrap_cfg, x, sigmas, extra_args={'cond': c, 'uncond': uc, 'cond_scale': scale}, disable=False)
 
                 x_samples_ddim = model_var.decode_first_stage(samples_ddim)
-                img = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0).cpu()
-                del x_samples_ddim
-                del samples_ddim
-                del c
-                mem = torch.cuda.memory_allocated()/1e6
-                model_var.to('cpu')
-                while(torch.cuda.memory_allocated()/1e6 >= mem):
-                    time.sleep(1)
-                return img
-
+                return torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
 
 #Batch Prompts by Deforum
 
@@ -3044,9 +3053,10 @@ with demo:
                     with gr.Column():
                         with gr.Row():
                             with gr.Column():
+                                v_input_images = gr.Dropdown(batch_pathlist)
                                 input_var = gr.Image()
-                                var_samples = gr.Slider(minimum=1, maximum=8, step=1, label='Samples (V100 = 3 x 512x512)', value=1)#n_samples
-                                var_plms = gr.Checkbox(label='PLMS (Off is DDIM)', value=True, visible=True, interactive=True)
+                                var_samples = gr.Slider(minimum=1, maximum=8, step=1, label='Samples (V100 = 8 x 512x512)', value=1)#n_samples
+                                var_plms = gr.Dropdown(label='Sampler', choices=['k_dpm_2_a', 'k_dpm_2', 'k_euler_a', 'k_euler', 'k_heun', 'k_lms'], value='k_euler_a', visible=True, interactive=True)
                                 with gr.Row():
                                     v_GFPGAN = gr.Checkbox(label='GFPGAN, Upscaler', value=False)
                                     v_bg_upsampling = gr.Checkbox(label='BG Enhancement', value=False)
@@ -3249,11 +3259,14 @@ with demo:
         var_inputs = [input_var, var_outdir, var_samples, var_plms, v_cfg_scale, v_steps, v_W, v_H, v_ddim_eta, v_GFPGAN, v_bg_upsampling, v_upscale]
         var_outputs = [output_var]
         var_btn.click(variations, inputs=var_inputs, outputs=var_outputs)
+        v_input_images.change(fn=view_editor_file, inputs=[v_input_images], outputs=[input_var, v_input_images])
+
 
     soup_btn.click(fn=process_noodle_soup, inputs=soup_inputs, outputs=soup_outputs)
 
     refresh_btn.click(fn=refresh, inputs=i_init_img_array, outputs=i_init_img_array)
     inPaint_btn.click(fn=run_batch, inputs=mask_inputs, outputs=inPaint_outputs)
+    i_path_to_view.change(fn=view_editor_file, inputs=[i_path_to_view], outputs=[i_init_img_array, i_path_to_view])
 
     anim_btn.click(fn=anim, inputs=anim_inputs, outputs=anim_outputs)
     kb_btn.click(fn=kb_build, inputs=kb_inputs, outputs=kb_outputs)
@@ -3270,7 +3283,6 @@ with demo:
     batch_path_to_view.change(fn=view_batch_file, inputs=[batch_path_to_view], outputs=[batch_outputs, batch_path_to_view])
 
 
-    i_path_to_view.change(fn=view_editor_file, inputs=[i_path_to_view], outputs=[i_init_img_array, i_path_to_view])
 
 
 class ServerLauncher(threading.Thread):
