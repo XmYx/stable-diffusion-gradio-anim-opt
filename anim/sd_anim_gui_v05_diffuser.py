@@ -73,7 +73,6 @@ def generate_diff(prompt, num_samples, num_rows, steps, scale):
         torch_dtype=torch.float16,
         text_encoder=text_encoder,
         tokenizer=tokenizer,
-        use_auth_token=True,
     ).to("cuda")
 
     pipe.safety_checker = dummy
@@ -1651,9 +1650,7 @@ def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, 
                         results.append(image)
 
 
-    print(f'image: {image}')
 
-    print(f'results: {results}')
     return results
 
 #Variations by Justinpinkey
@@ -1796,6 +1793,7 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
         dynamic_threshold = None
         static_threshold = None
         precision = 'autocast'
+        b_seed = int(b_seed)
         #fixed_code = True
         C = 4
         f = 8
@@ -1901,8 +1899,8 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
                             yield gr.update(value=b_outputs), gr.update(visible=False), gr.update(value=f"Rendering image {iprompt} of {enumerate(b_prompts)}")
 
                     if b_seed_behavior != 'fixed':
-                        b_seed = next_seed(b_seed, b_seed_behavior)
-                        b_seed_list.append(b_seed)
+                        u_seed = next_seed(u_seed, b_seed_behavior)
+                        b_seed_list.append(u_seed)
 
                         #if b_display_samples:
                         #    display.display(image)
@@ -2545,6 +2543,9 @@ def anim(animation_mode, animation_prompts, key_frames,
                                 print(f"Using video init frame {init_frame}")
                                 init_image = init_frame
                             # sample the diffusion model
+                            if GFPGAN:
+                                postGFPGAN = True
+                                GFPGAN = False
                             results = generate(prompt, batch_name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, scale, seed, sampler, n_batch, n_samples, ddim_eta, use_init, init_image, init_sample, strength, use_mask, mask_file, mask_contrast_adjust, mask_brightness_adjust, invert_mask, dynamic_threshold, static_threshold, C, f, init_c, return_latent=False, return_sample=True)
 
 
@@ -2557,6 +2558,11 @@ def anim(animation_mode, animation_prompts, key_frames,
                                 filename = f"{timestring}_{prev_total + frame_idx:05}.png"
                             else:
                                 filename = f"{timestring}_{frame_idx:05}.png"
+
+                            if postGFPGAN:
+                                image = FACE_RESTORATION(image, bg_upsampling, upscale).astype(np.uint8)
+                                image = Image.fromarray(image)
+
                             image.save(os.path.join(outdir, filename))
                             if not using_vid_init:
                                 prev_sample = sample
@@ -2564,10 +2570,9 @@ def anim(animation_mode, animation_prompts, key_frames,
                             seed = next_seed(seed, seed_behavior)
 
 
-                            img = image
                             mp4_path = ''
                             mp4_pathlist = []
-                            yield gr.update(value=img, visible=True), gr.update(visible=False)
+                            yield gr.update(value=image, visible=True), gr.update(visible=False)
 
 
 
@@ -2584,7 +2589,7 @@ def anim(animation_mode, animation_prompts, key_frames,
 
                 torch_gc()
                 if mp4_path == "":
-                    yield gr.update(value=img), gr.update(visible=False)
+                    yield gr.update(value=image), gr.update(visible=False)
                 else:
                     yield gr.update(visible=False), gr.update(value=mp4_path, visible=True)
 
@@ -2765,6 +2770,10 @@ if not opt.embeds:
 print(f'I                                           I')
 print(f'I-------------------------------------------I')
 
+if opt.loadp2p:
+    batch_sampler_choices = ['diffusers','klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim']
+else:
+    batch_sampler_choices = ['klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim']
 
 with demo:
     with gr.Tabs():
@@ -2915,7 +2924,7 @@ with demo:
                     b_init_img_array = gr.Image(visible=False)
 
                     b_sampler = gr.Radio(label='Sampler',
-                                        choices=['diffusers','klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim'],
+                                        choices=batch_sampler_choices,
                                         value='klms',
                                         interactive=True)#sampler
                     b_prompts = gr.Textbox(label='Prompts',
