@@ -1522,7 +1522,7 @@ def parse_key_frames(string, prompt_parser=None):
 
 #Image generator
 
-def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, scale, seed, samplern, n_batch, n_samples, ddim_eta, use_init, init_image, init_sample, strength, use_mask, mask_file, mask_contrast_adjust, mask_brightness_adjust, invert_mask, maskmode, dynamic_threshold, static_threshold, C, f, init_c, return_latent=False, return_sample=False, return_c=False):
+def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, scale, seed, samplern, n_batch, n_samples, ddim_eta, use_init, init_image, init_sample, strength, use_mask, mask_file, mask_contrast_adjust, mask_brightness_adjust, invert_mask, dynamic_threshold, static_threshold, C, f, init_c, return_latent=False, return_sample=False, return_c=False):
     opt.H = H
     opt.W = W
 
@@ -1573,19 +1573,12 @@ def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, 
         print(f'Using Mask {mask_file}')
 
 
-        if maskmode == 'uncrop':
-            mask = np.array(Image.open(mask_file).convert("L"))
-            mask = mask.astype(np.float16)/255.0
-            mask = mask[None,None]
-            mask[mask < 0.5] = 0
-            mask[mask >= 0.5] = 1
-            mask = torch.from_numpy(mask).to(device)
-        else:
-            mask = prepare_mask(mask_file,
-                                init_latent.shape,
-                                mask_contrast_adjust,
-                                mask_brightness_adjust,
-                                invert_mask)
+
+        mask = prepare_mask(mask_file,
+                            init_latent.shape,
+                            mask_contrast_adjust,
+                            mask_brightness_adjust,
+                            invert_mask)
 
         mask = mask.to(device)
         mask = repeat(mask, '1 ... -> b ...', b=batch_size)
@@ -1623,11 +1616,9 @@ def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, 
 
 
 
-                    c = model.get_learned_conditioning(prompts)
-                    if maskmode == 'uncrop':
-                        cc = torch.nn.functional.interpolate(mask,
-                                                            size=c.shape[-2:])
-                        c = torch.cat((c, cc), dim=1)
+
+                        c = model.get_learned_conditioning(prompts)
+
                     if init_c != None:
                         c = init_c
 
@@ -1980,7 +1971,7 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
                                            b_init_sample, b_strength,
                                            b_use_mask, b_mask_file,
                                            b_mask_contrast_adjust,
-                                           b_mask_brightness_adjust, b_invert_mask, b_maskmode,
+                                           b_mask_brightness_adjust, b_invert_mask,
                                            dynamic_threshold=None, static_threshold=None, C=4, f=8, init_c=None)
                     else:
                         images = generate_diff(b_prompts[iprompt], b_n_samples, b_n_batch, b_steps, b_scale)
@@ -3089,19 +3080,19 @@ with demo:
             with gr.Row():
                 with gr.Column():
                     with gr.Row():
-                        i_maskmode = gr.Radio(label="crop mode", choices=['uncrop', 'inpaint'], interactive=True, value='uncrop', visible=True)
+                        i_maskmode = gr.Radio(label="crop mode", choices=['uncrop', 'inpaint'], interactive=True, value='inpaint', visible=False)
                         i_path_to_view = gr.Dropdown(label='Images', choices=batch_pathlist)
                     refresh_btn = gr.Button('Refresh')
                     i_init_img_array = gr.Image(value=inPaint, source="upload", interactive=True,
                                                                       type="pil", tool="sketch", visible=True,
                                                                       elem_id="mask")
-                    i_outpaint = gr.Image(visible=True)
+                    i_outpaint = gr.Image(visible=False)
 
                     i_prompts = gr.Textbox(label='Prompts',
                                 placeholder='a beautiful forest by Asher Brown Durand, trending on Artstation\na beautiful city by Asher Brown Durand, trending on Artstation',
                                 lines=1)#animation_prompts
                     inPaint_btn = gr.Button('Inpaint')
-                    i_outpaint_btn = gr.Button('Uncrop', visible=True)
+                    i_outpaint_btn = gr.Button('Uncrop', visible=False)
 
                     i_strength = gr.Slider(minimum=0, maximum=1, step=0.01, label='Init Image Strength', value=0.01, interactive=True)#strength
                     i_batch_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
