@@ -1548,18 +1548,11 @@ def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, 
     elif init_sample is not None:
         init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_sample))
     elif use_init and init_image != None and init_image != '':
-        if maskmode == 'uncrop':
-            image = np.array(Image.open(init_image).convert("RGB"))
-            image = image.astype(np.float16)/255.0
-            image = image[None].transpose(0,3,1,2)
-            init_image = torch.from_numpy(image).to(device)
-            init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_image))  # move to latent space
 
-        else:
 
-            init_image = load_img(init_image, shape=(W, H)).to(device)
-            init_image = repeat(init_image, '1 ... -> b ...', b=batch_size)
-            init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_image))  # move to latent space
+          init_image = load_img(init_image, shape=(W, H)).to(device)
+          init_image = repeat(init_image, '1 ... -> b ...', b=batch_size)
+          init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_image))  # move to latent space
 
     if not use_init and strength > 0:
         print("\nNo init image, but strength > 0. This may give you some strange results.\n")
@@ -1624,8 +1617,6 @@ def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, 
 
                     if samplern in ["klms","dpm2","dpm2_ancestral","heun","euler","euler_ancestral"]:
                         shape = [4, H // 8, W // 8]
-                        if maskmode == 'uncrop':
-                            shape = (c.shape[1]-1,)+c.shape[2:]
                         samples = sampler_fn(
                             c=c,
                             uc=uc,
