@@ -1134,6 +1134,23 @@ def FACE_RESTORATION(image, bg_upsampling, upscale):
     image = cv2.cvtColor(restored_img, cv2.COLOR_BGR2RGB)
     image = bg_upsampler.enhance(image, outscale=upscale)[0]
     return image
+def esrGAN(image, upscale):
+    from basicsr.archs.rrdbnet_arch import RRDBNet
+    from realesrgan import RealESRGANer
+    model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
+    bg_upsampler = RealESRGANer(
+        scale=4,
+        model_path='/content/Real-ESRGAN/experiments/pretrained_models/RealESRGAN_x4plus.pth',
+        model=model,
+        tile=400,
+        tile_pad=10,
+        pre_pad=0,
+        half=True)
+    image=np.array(image)
+    image = bg_upsampler.enhance(image, outscale=upscale)[0]
+    return image
+
+
 
 class CFGDenoiser(nn.Module):
     def __init__(self, model):
@@ -2712,9 +2729,43 @@ def anim(animation_mode, animation_prompts, key_frames,
                 torch_gc()
                 return outputs
 
+def imgproc(p_image, p_proc, p_esrgan2x, p_esrgan4x, p_scale_W, p_scale_H, p_outdir):
+    timestring = time.strftime('%Y%m%d%H%M%S')
+    os.makedirs(f'{outdir}/_lab', exist_ok=True)
+    results = []
+    print(p_proc)
+    if "GFPGAN + RealESGAN" in p_proc:
+        bg_upsampling = True
+        p_image = FACE_RESTORATION(p_image, bg_upsampling, p_esrgan2x).astype(np.uint8)
+        p_image = Image.fromarray(p_image)
+        path = f'{outdir}/_lab/{timestring}_{GFPGAN}.png'
+        p_image.save(path)
+        results.append(path)
+    if "RealESGAN" in p_proc:
+        RealESRGAN = load_RealESRGAN('RealESRGAN_x4plus')
+        result, res = RealESRGAN.enhance(np.array(p_image, dtype=np.uint8))
+        p_image = Image.fromarray(result)
+        path = f'{outdir}/_lab/{timestring}_{ESRGAN}.png'
+        p_image.save(path)
+        results.append(path)
+
+        #p_image = esrGAN(p_image, p_esrgan4x)
+    if "" in p_proc:
+        p_image = resize_image(2, p_image, p_scale_W, p_scale_H)
+        path = f'{outdir}/_lab/{timestring}_{resize}.png'
+        p_image.save(path)
+        results.append(path)
+    return results
+
+
 #UI
 
 torch_gc()
+
+
+
+
+
 inPaint=None
 cfg_snapshots = []
 demo = gr.Blocks('SD 1.4 - Anim 0.5')
@@ -2862,6 +2913,8 @@ if opt.load_p2p:
     batch_sampler_choices = ['diffusers','klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim']
 else:
     batch_sampler_choices = ['klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim']
+
+imgproc_choices = ['GFPGAN + RealESGAN', 'RealESGAN', 'Resize Only']
 
 with demo:
     with gr.Tabs():
@@ -3208,6 +3261,23 @@ with demo:
 
                     with gr.Column():
                         edit_output = gr.Image()
+        with gr.TabItem('Image Processor'):
+            with gr.Row():
+                with gr.Column():
+                    p_path_to_view = gr.Dropdown(label = 'Images', choices = batch_pathlist)
+                    p_image = gr.Image()
+                    p_proc = gr.CheckboxGroup(choices = imgproc_choices)
+                    p_esrgan2x = gr.Slider(minimum=1, maximum=8, step=1, label='GFPGAN + RealESGAN', value=1, interactive=True)
+                    p_esrgan4x = gr.Slider(minimum=1, maximum=8, step=1, label='RealESGAN', value=1, interactive=True)
+                    with gr.Row():
+                        p_scale_W = gr.Slider(minimum=64, maximum=2048, step=64, label='Width', value=512, interactive=True)
+                        p_scale_H = gr.Slider(minimum=64, maximum=2048, step=64, label='Height', value=512, interactive=True)
+                    p_outdir = gr.Textbox(label='Output Dir',  placeholder='/content/', lines=1, value=f'{opt.outdir}/_batch_images', interactive=True)#outdir
+
+                with gr.Column():
+                    imgproc_btn = gr.Button("Process")
+                    p_output = gr.Gallery()
+
         with gr.TabItem('NoodleSoup'):
             with gr.Column():
                 input_prompt = gr.Textbox(label='IN',  placeholder='Portrait of a _adj-beauty_ _noun-emote_ _nationality_ woman from _pop-culture_ in _pop-location_ with pearlescent skin and white hair by _artist_, _site_', lines=2)
@@ -3337,13 +3407,11 @@ with demo:
                         rotation_3d_z, use_depth_warping, midas_weight, near_plane,
                         far_plane, fov, padding_mode, sampling_mode]
 
-
+    imgproc_inputs = [p_image, p_proc, p_esrgan2x, p_esrgan4x, p_scale_W, p_scale_H, p_outdir]
+    imgproc_outputs = [p_output]
 
     soup_inputs = [input_prompt]
     soup_outputs = [output_prompt]
-
-
-
 
     batch_outs = [batch_outputs, batch_path_to_view, b_log]
     inPaint_outputs = [inPainted, i_path_to_view, i_log]
@@ -3395,6 +3463,7 @@ with demo:
     batch_btn.click(fn=run_batch, inputs=batch_inputs, outputs=batch_outs)
     batch_path_to_view.change(fn=view_batch_file, inputs=[batch_path_to_view], outputs=[batch_outputs, batch_path_to_view])
 
+    imgproc_btn.click(fn=imgproc, inputs=imgproc_inputs, outputs=imgproc_outputs)
 
 
 
