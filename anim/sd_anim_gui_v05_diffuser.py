@@ -18,7 +18,8 @@ from einops import rearrange, repeat
 from itertools import islice
 from omegaconf import OmegaConf
 import PIL
-from PIL import Image, ImageDraw
+from PIL import Image, ImageFont, ImageDraw, ImageFilter, ImageOps
+from PIL.PngImagePlugin import PngInfo
 from pytorch_lightning import seed_everything
 from skimage.exposure import match_histograms
 from torchvision.utils import make_grid as mkgrid
@@ -30,6 +31,7 @@ from gfpgan import GFPGANer
 from io import BytesIO
 import fire
 import gc
+from perlin import perlinNoise
 
 #Prompt-to-Promtp image editing
 from transformers import CLIPModel, CLIPTextModel, CLIPTokenizer
@@ -165,6 +167,42 @@ def load_RealESRGAN(model_name: str, checking = False):
     return instance
 
 RealESRGAN = load_RealESRGAN('RealESRGAN_x4plus')
+
+def resize_image(resize_mode, im, width, height):
+    LANCZOS = (Image.Resampling.LANCZOS if hasattr(Image, 'Resampling') else Image.LANCZOS)
+    if resize_mode == 0:
+        res = im.resize((width, height), resample=LANCZOS)
+    elif resize_mode == 1:
+        ratio = width / height
+        src_ratio = im.width / im.height
+
+        src_w = width if ratio > src_ratio else im.width * height // im.height
+        src_h = height if ratio <= src_ratio else im.height * width // im.width
+
+        resized = im.resize((src_w, src_h), resample=LANCZOS)
+        res = Image.new("RGBA", (width, height))
+        res.paste(resized, box=(width // 2 - src_w // 2, height // 2 - src_h // 2))
+    else:
+        ratio = width / height
+        src_ratio = im.width / im.height
+
+        src_w = width if ratio < src_ratio else im.width * height // im.height
+        src_h = height if ratio >= src_ratio else im.height * width // im.width
+
+        resized = im.resize((src_w, src_h), resample=LANCZOS)
+        res = Image.new("RGBA", (width, height))
+        res.paste(resized, box=(width // 2 - src_w // 2, height // 2 - src_h // 2))
+
+        if ratio < src_ratio:
+            fill_height = height // 2 - src_h // 2
+            res.paste(resized.resize((width, fill_height), box=(0, 0, width, 0)), box=(0, 0))
+            res.paste(resized.resize((width, fill_height), box=(0, resized.height, width, resized.height)), box=(0, fill_height + src_h))
+        elif ratio > src_ratio:
+            fill_width = width // 2 - src_w // 2
+            res.paste(resized.resize((fill_width, height), box=(0, 0, 0, height)), box=(0, 0))
+            res.paste(resized.resize((fill_width, height), box=(resized.width, 0, resized.width, height)), box=(fill_width + src_w, 0))
+
+    return res
 
 def convert_pil_img(image):
     w, h = image.size
@@ -1753,6 +1791,11 @@ def sample_model(input_im, model_var, sampler, precision, h, w, ddim_steps, n_sa
                 return torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
 
 #Batch Prompts by Deforum
+def blurArr(a,r=8):
+    im1=Image.fromarray((a*255).astype(np.int8),"L")
+    im2 = im1.filter(ImageFilter.GaussianBlur(radius = r))
+    out= np.array(im2)/255
+    return out
 
 def batch_dict(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
                 b_upscale, b_W, b_H, b_steps, b_scale, b_seed_behavior,
@@ -1760,13 +1803,13 @@ def batch_dict(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
                 b_save_samples, b_n_batch, b_n_samples, b_ddim_eta,
                 b_use_init, b_init_image, b_strength, b_make_grid):
                 return locals()
-
+opt.maskmode = ""
 def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
               b_upscale, b_W, b_H, b_steps, b_scale, b_seed_behavior,
               b_seed, b_sampler, b_save_grid, b_save_settings, b_save_samples,
               b_n_batch, b_n_samples, b_ddim_eta, b_use_init, b_init_image,
               b_strength, b_make_grid, b_init_img_array, b_use_mask,
-              b_mask_file, b_invert_mask, b_mask_brightness_adjust, b_mask_contrast_adjust,
+              b_mask_file, b_invert_mask, b_mask_brightness_adjust, b_mask_contrast_adjust, b_maskmode,
               b_gobig, b_passes, b_overlap, b_detail_steps, b_detail_scale, b_g_strength, b_gobigsampler, b_pregobig):
         timestring = time.strftime('%Y%m%d%H%M%S')
 
@@ -1779,7 +1822,8 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
         g_outdir = f'{b_outdir}/_grid_images'
         # create output folder for the batch
         os.makedirs(b_outdir, exist_ok=True)
-
+        b_W=int(b_W)
+        b_H=int(b_H)
         index = 0
         all_images = []
         b_outputs = []
@@ -1814,14 +1858,79 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
         else:
             opt.gobig = False
             opt.pre_gobig_gfpgan = False
-        if b_init_img_array != None:
-            initdir = f'{b_outdir}/init'
-            os.makedirs(initdir, exist_ok=True)
-            r = random.randint(10000, 99999)
-            b_init_image = f'{b_outdir}/init/init_{b_seed}_{timestring}.png'
-            b_mask_file = f'{b_outdir}/init/mask_{b_seed}_{timestring}.png'
-            b_init_img_array['image'].save(os.path.join(b_outdir, b_init_image))
-            b_init_img_array['mask'].save(os.path.join(b_outdir, b_mask_file))
+        print(b_init_img_array)
+        print(type(b_init_img_array))
+        if b_use_mask == True:
+            if b_maskmode == 'uncrop':
+                resize_mode=2
+                #image = Image.fromarray(b_init_img_array).convert("RGB")
+                #_image=b_init_img_array.numpy()[0]
+                _image=b_init_img_array
+                img=Image.fromarray(b_init_img_array)
+                _mask=np.ones((_image.shape[1],_image.shape[2]))
+
+                #compute bounding box
+                cmax=np.max(_image,axis=0)
+                rowmax=np.max(cmax,axis=0)
+                colmax=np.max(cmax,axis=1)
+                rowwhere=np.where(rowmax>0)[0]
+                colwhere=np.where(colmax>0)[0]
+                rowstart=rowwhere[0]
+                rowend=rowwhere[-1]+1
+                colstart=colwhere[0]
+                colend=colwhere[-1]+1
+                print('bounding box: ',rowstart,rowend,colstart,colend)
+
+                #this is where noise will get added
+                PAD_IMG=16
+                boundingbox=np.zeros(shape=(b_H,b_W))
+                boundingbox[colstart+PAD_IMG:colend-PAD_IMG,rowstart+PAD_IMG:rowend-PAD_IMG]=1
+                boundingbox=blurArr(boundingbox,4)
+
+                #this is the mask for outpainting
+                PAD_MASK=24
+                boundingbox2=np.zeros(shape=(b_H,b_W))
+                boundingbox2[colstart+PAD_MASK:colend-PAD_MASK,rowstart+PAD_MASK:rowend-PAD_MASK]=1
+                boundingbox2=blurArr(boundingbox2,4)
+
+                #noise=np.random.randn(*_image.shape)
+                noise=np.array([perlinNoise(b_H,b_W,b_H/64,b_W/64) for i in range(3)])
+
+                print(_mask)
+                print(boundingbox2)
+                _mask = np.dot(_mask,1-boundingbox2)
+
+                #convert 0,1 to -1,1
+                _image = 2. * _image - 1.
+
+                #add noise
+                boundingbox=np.tile(boundingbox,(3,1,1))
+
+                _image=_image*boundingbox+noise*(1-boundingbox)
+                #resize mask
+                _mask = np.array(resize_image(resize_mode, Image.fromarray(_mask*255), b_W // 8, b_H // 8))/255
+
+                #alpha = Image.fromarray(b_init_img_array).convert("RGB")
+                #alpha = resize_image(resize_mode, alpha, b_W // 8, b_H // 8)
+                #mask_channel = alpha.split()[-1]
+                #mask_channel = mask_channel.filter(ImageFilter.GaussianBlur(4))
+                #mask_channel = np.array(mask_channel)
+                #mask_channel[mask_channel >= 255] = 255
+                #mask_channel[mask_channel < 255] = 0
+                #mask_channel = Image.fromarray(mask_channel).filter(ImageFilter.GaussianBlur(2))
+                b_mask_file = f'{b_outdir}/init/mask_{b_seed}_{timestring}.png'
+                _mask.save(os.path.join(b_outdir, b_mask_file))
+                b_init_image = f'{b_outdir}/init/init_{b_seed}_{timestring}.png'
+                img = Image.fromarray(b_init_img_array)
+                img.save(os.path.join(b_outdir, b_init_image))
+            else:
+                initdir = f'{b_outdir}/init'
+                os.makedirs(initdir, exist_ok=True)
+                r = random.randint(10000, 99999)
+                b_init_image = f'{b_outdir}/init/init_{b_seed}_{timestring}.png'
+                b_mask_file = f'{b_outdir}/init/mask_{b_seed}_{timestring}.png'
+                b_init_img_array['image'].save(os.path.join(b_outdir, b_init_image))
+                b_init_img_array['mask'].save(os.path.join(b_outdir, b_mask_file))
             b_use_mask = True
             b_use_init = True
         else:
@@ -2770,7 +2879,7 @@ if not opt.embeds:
 print(f'I                                           I')
 print(f'I-------------------------------------------I')
 
-if opt.loadp2p:
+if opt.load_p2p:
     batch_sampler_choices = ['diffusers','klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim']
 else:
     batch_sampler_choices = ['klms','dpm2','dpm2_ancestral','heun','euler','euler_ancestral','plms', 'ddim']
@@ -2919,6 +3028,8 @@ with demo:
             with gr.Row():
                 with gr.Column():
                     with gr.Row():
+                        b_maskmode = gr.Radio(label="crop mode", choices=['uncrop', 'inpaint'], interactive=True, value='inpaint', visible=False)
+
                         stop_batch_btn = gr.Button('stop')
                         batch_path_to_view = gr.Dropdown(label='Images', choices=batch_pathlist)
                     b_init_img_array = gr.Image(visible=False)
@@ -2981,15 +3092,20 @@ with demo:
             with gr.Row():
                 with gr.Column():
                     with gr.Row():
+                        i_maskmode = gr.Radio(label="crop mode", choices=['uncrop', 'inpaint'], interactive=True, value='inpaint', visible=False)
                         i_path_to_view = gr.Dropdown(label='Images', choices=batch_pathlist)
                     refresh_btn = gr.Button('Refresh')
                     i_init_img_array = gr.Image(value=inPaint, source="upload", interactive=True,
                                                                       type="pil", tool="sketch", visible=True,
                                                                       elem_id="mask")
+                    i_outpaint = gr.Image(visible=False)
+
                     i_prompts = gr.Textbox(label='Prompts',
                                 placeholder='a beautiful forest by Asher Brown Durand, trending on Artstation\na beautiful city by Asher Brown Durand, trending on Artstation',
                                 lines=1)#animation_prompts
-                    inPaint_btn = gr.Button('Generate')
+                    inPaint_btn = gr.Button('Inpaint')
+                    i_outpaint_btn = gr.Button('Uncrop', visible=False)
+
                     i_strength = gr.Slider(minimum=0, maximum=1, step=0.01, label='Init Image Strength', value=0.01, interactive=True)#strength
                     i_batch_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
                     i_outdir = gr.Textbox(label='Output Dir',  placeholder='/content/', lines=1, value=f'{opt.outdir}/_inPaint', interactive=True)#outdir
@@ -3201,7 +3317,7 @@ with demo:
                     b_seed, b_sampler, b_save_grid, b_save_settings, b_save_samples,
                     b_n_batch, b_n_samples, b_ddim_eta, b_use_init, b_init_image,
                     b_strength, b_make_grid, b_init_img_array, b_use_mask,
-                    b_mask_file, b_invert_mask, b_mask_brightness_adjust, b_mask_contrast_adjust,
+                    b_mask_file, b_invert_mask, b_mask_brightness_adjust, b_mask_contrast_adjust, b_maskmode,
                     b_gobig, b_passes, b_overlap, b_detail_steps, b_detail_scale, b_g_strength, b_gobigsampler, b_pregobig]
 
 
@@ -3212,7 +3328,14 @@ with demo:
                     i_seed, i_sampler, i_save_grid, i_save_settings, i_save_samples,
                     i_n_batch, i_n_samples, i_ddim_eta, i_use_init, i_init_image,
                     i_strength, i_make_grid, i_init_img_array, i_use_mask,
-                    i_mask_file, i_invert_mask, i_mask_brightness_adjust, i_mask_contrast_adjust,
+                    i_mask_file, i_invert_mask, i_mask_brightness_adjust, i_mask_contrast_adjust, i_maskmode,
+                    i_gobig, i_passes, i_overlap, i_detail_steps, i_detail_scale, i_g_strength, i_gobigsampler, i_pregobig]
+    outpaint_inputs = [i_prompts, i_batch_name, i_outdir, i_GFPGAN, i_bg_upsampling,
+                    i_upscale, i_W, i_H, i_steps, i_scale, i_seed_behavior,
+                    i_seed, i_sampler, i_save_grid, i_save_settings, i_save_samples,
+                    i_n_batch, i_n_samples, i_ddim_eta, i_use_init, i_init_image,
+                    i_strength, i_make_grid, i_outpaint, i_use_mask,
+                    i_mask_file, i_invert_mask, i_mask_brightness_adjust, i_mask_contrast_adjust, i_maskmode,
                     i_gobig, i_passes, i_overlap, i_detail_steps, i_detail_scale, i_g_strength, i_gobigsampler, i_pregobig]
 
     kb_inputs = [kb_string, kb_frame, kb_value]
@@ -3276,6 +3399,8 @@ with demo:
     refresh_btn.click(fn=refresh, inputs=i_init_img_array, outputs=i_init_img_array)
     inPaint_btn.click(fn=run_batch, inputs=mask_inputs, outputs=inPaint_outputs)
     i_path_to_view.change(fn=view_editor_file, inputs=[i_path_to_view], outputs=[i_init_img_array, i_path_to_view])
+
+    i_outpaint_btn.click(fn=run_batch, inputs=outpaint_inputs, outputs=inPaint_outputs)
 
     anim_btn.click(fn=anim, inputs=anim_inputs, outputs=anim_outputs)
     kb_btn.click(fn=kb_build, inputs=kb_inputs, outputs=kb_outputs)
