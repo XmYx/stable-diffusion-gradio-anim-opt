@@ -1550,9 +1550,9 @@ def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, 
     elif use_init and init_image != None and init_image != '':
 
 
-          init_image = load_img(init_image, shape=(W, H)).to(device)
-          init_image = repeat(init_image, '1 ... -> b ...', b=batch_size)
-          init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_image))  # move to latent space
+        init_image = load_img(init_image, shape=(W, H)).to(device)
+        init_image = repeat(init_image, '1 ... -> b ...', b=batch_size)
+        init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_image))  # move to latent space
 
     if not use_init and strength > 0:
         print("\nNo init image, but strength > 0. This may give you some strange results.\n")
@@ -1610,7 +1610,7 @@ def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, 
 
 
 
-                        c = model.get_learned_conditioning(prompts)
+                    c = model.get_learned_conditioning(prompts)
 
                     if init_c != None:
                         c = init_c
