@@ -18,7 +18,7 @@ from einops import rearrange, repeat
 from itertools import islice
 from omegaconf import OmegaConf
 import PIL
-from PIL import Image, ImageFont, ImageDraw, ImageFilter, ImageOps
+from PIL import Image, ImageFont, ImageDraw, ImageFilter, ImageOps, ImageChops
 from PIL.PngImagePlugin import PngInfo
 from pytorch_lightning import seed_everything
 from skimage.exposure import match_histograms
@@ -1522,7 +1522,7 @@ def parse_key_frames(string, prompt_parser=None):
 
 #Image generator
 
-def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, scale, seed, samplern, n_batch, n_samples, ddim_eta, use_init, init_image, init_sample, strength, use_mask, mask_file, mask_contrast_adjust, mask_brightness_adjust, invert_mask, dynamic_threshold, static_threshold, C, f, init_c, return_latent=False, return_sample=False, return_c=False):
+def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, scale, seed, samplern, n_batch, n_samples, ddim_eta, use_init, init_image, init_sample, strength, use_mask, mask_file, mask_contrast_adjust, mask_brightness_adjust, invert_mask, maskmode, dynamic_threshold, static_threshold, C, f, init_c, return_latent=False, return_sample=False, return_c=False):
     opt.H = H
     opt.W = W
 
@@ -1548,9 +1548,18 @@ def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, 
     elif init_sample is not None:
         init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_sample))
     elif use_init and init_image != None and init_image != '':
-        init_image = load_img(init_image, shape=(W, H)).to(device)
-        init_image = repeat(init_image, '1 ... -> b ...', b=batch_size)
-        init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_image))  # move to latent space
+        if maskmode == 'uncrop':
+            image = np.array(Image.open(init_image).convert("RGB"))
+            image = image.astype(np.float16)/255.0
+            image = image[None].transpose(0,3,1,2)
+            init_image = torch.from_numpy(image).to(device)
+            init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_image))  # move to latent space
+
+        else:
+
+            init_image = load_img(init_image, shape=(W, H)).to(device)
+            init_image = repeat(init_image, '1 ... -> b ...', b=batch_size)
+            init_latent = model.get_first_stage_encoding(model.encode_first_stage(init_image))  # move to latent space
 
     if not use_init and strength > 0:
         print("\nNo init image, but strength > 0. This may give you some strange results.\n")
@@ -1562,11 +1571,21 @@ def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, 
         assert use_init, "use_mask==True: use_init is required for a mask"
         assert init_latent is not None, "use_mask==True: An latent init image is required for a mask"
         print(f'Using Mask {mask_file}')
-        mask = prepare_mask(mask_file,
-                            init_latent.shape,
-                            mask_contrast_adjust,
-                            mask_brightness_adjust,
-                            invert_mask)
+
+
+        if maskmode == 'uncrop':
+            mask = np.array(Image.open(mask_file).convert("L"))
+            mask = mask.astype(np.float16)/255.0
+            mask = mask[None,None]
+            mask[mask < 0.5] = 0
+            mask[mask >= 0.5] = 1
+            mask = torch.from_numpy(mask).to(device)
+        else:
+            mask = prepare_mask(mask_file,
+                                init_latent.shape,
+                                mask_contrast_adjust,
+                                mask_brightness_adjust,
+                                invert_mask)
 
         mask = mask.to(device)
         mask = repeat(mask, '1 ... -> b ...', b=batch_size)
@@ -1602,13 +1621,20 @@ def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, 
                         prompts = list(prompts)
 
 
-                    c = model.get_learned_conditioning(prompts)
 
+
+                    c = model.get_learned_conditioning(prompts)
+                    if maskmode == 'uncrop':
+                        cc = torch.nn.functional.interpolate(mask,
+                                                            size=c.shape[-2:])
+                        c = torch.cat((c, cc), dim=1)
                     if init_c != None:
                         c = init_c
 
                     if samplern in ["klms","dpm2","dpm2_ancestral","heun","euler","euler_ancestral"]:
                         shape = [4, H // 8, W // 8]
+                        if maskmode == 'uncrop':
+                            shape = (c.shape[1]-1,)+c.shape[2:]
                         samples = sampler_fn(
                             c=c,
                             uc=uc,
@@ -1862,78 +1888,49 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
         print(type(b_init_img_array))
         if b_use_mask == True:
             if b_maskmode == 'uncrop':
-                resize_mode=2
-                #image = Image.fromarray(b_init_img_array).convert("RGB")
-                #_image=b_init_img_array.numpy()[0]
-                _image=b_init_img_array
-                img=Image.fromarray(b_init_img_array)
-                _mask=np.ones((_image.shape[1],_image.shape[2]))
+                resize_mode=0
 
-                #compute bounding box
-                cmax=np.max(_image,axis=0)
-                rowmax=np.max(cmax,axis=0)
-                colmax=np.max(cmax,axis=1)
-                rowwhere=np.where(rowmax>0)[0]
-                colwhere=np.where(colmax>0)[0]
-                rowstart=rowwhere[0]
-                rowend=rowwhere[-1]+1
-                colstart=colwhere[0]
-                colend=colwhere[-1]+1
-                print('bounding box: ',rowstart,rowend,colstart,colend)
-
-                #this is where noise will get added
-                PAD_IMG=16
-                boundingbox=np.zeros(shape=(b_H,b_W))
-                boundingbox[colstart+PAD_IMG:colend-PAD_IMG,rowstart+PAD_IMG:rowend-PAD_IMG]=1
-                boundingbox=blurArr(boundingbox,4)
-
-                #this is the mask for outpainting
-                PAD_MASK=24
-                boundingbox2=np.zeros(shape=(b_H,b_W))
-                boundingbox2[colstart+PAD_MASK:colend-PAD_MASK,rowstart+PAD_MASK:rowend-PAD_MASK]=1
-                boundingbox2=blurArr(boundingbox2,4)
-
-                #noise=np.random.randn(*_image.shape)
-                noise=np.array([perlinNoise(b_H,b_W,b_H/64,b_W/64) for i in range(3)])
-
-                print(_mask)
-                print(boundingbox2)
-                _mask = np.dot(_mask,1-boundingbox2)
-
-                #convert 0,1 to -1,1
-                _image = 2. * _image - 1.
-
-                #add noise
-                boundingbox=np.tile(boundingbox,(3,1,1))
-
-                _image=_image*boundingbox+noise*(1-boundingbox)
-                #resize mask
-                _mask = np.array(resize_image(resize_mode, Image.fromarray(_mask*255), b_W // 8, b_H // 8))/255
-
-                #alpha = Image.fromarray(b_init_img_array).convert("RGB")
-                #alpha = resize_image(resize_mode, alpha, b_W // 8, b_H // 8)
-                #mask_channel = alpha.split()[-1]
-                #mask_channel = mask_channel.filter(ImageFilter.GaussianBlur(4))
-                #mask_channel = np.array(mask_channel)
-                #mask_channel[mask_channel >= 255] = 255
-                #mask_channel[mask_channel < 255] = 0
-                #mask_channel = Image.fromarray(mask_channel).filter(ImageFilter.GaussianBlur(2))
-                b_mask_file = f'{b_outdir}/init/mask_{b_seed}_{timestring}.png'
-                _mask.save(os.path.join(b_outdir, b_mask_file))
-                b_init_image = f'{b_outdir}/init/init_{b_seed}_{timestring}.png'
-                img = Image.fromarray(b_init_img_array)
-                img.save(os.path.join(b_outdir, b_init_image))
-            else:
                 initdir = f'{b_outdir}/init'
                 os.makedirs(initdir, exist_ok=True)
-                r = random.randint(10000, 99999)
+
+                w = 512
+                h = 512
+                path = "/content/test/test.png"
+                path2 = "/content/test/test2.png"
+
+                img = Image.fromarray(b_init_img_array)
+                mask = resize_image(1, img, w, h).convert('L')
+                mask_2 = ImageOps.invert(mask.split()[-1])
+                mask_channel = np.array(mask_2)
+                mask_channel[mask_channel >= 255] = 255
+                mask_channel[mask_channel < 255] = 0
+                mask_channel = ( (mask_channel - 0.5) * -1) + 0.5
+
+                mask_channel = Image.fromarray(mask_channel).convert("RGB")
+                mask_channel = ImageOps.invert(mask_channel.split()[-1])
+                b_mask_file = f'{b_outdir}/init/mask_{b_seed}_{timestring}.png'
+
+                b_init_image = f'{b_outdir}/init/init_{b_seed}_{timestring}.png'
+
+
+                b_use_mask = True
+                b_use_init = True
+
+
+                mask_channel.save(b_mask_file)
+
+                img.save(b_init_image)
+                print(f'Mask file saved as: {os.path.isfile(b_init_image)}')
+            elif b_maskmode == 'inpaint':
+                initdir = f'{b_outdir}/init'
+                os.makedirs(initdir, exist_ok=True)
                 b_init_image = f'{b_outdir}/init/init_{b_seed}_{timestring}.png'
                 b_mask_file = f'{b_outdir}/init/mask_{b_seed}_{timestring}.png'
                 b_init_img_array['image'].save(os.path.join(b_outdir, b_init_image))
                 b_init_img_array['mask'].save(os.path.join(b_outdir, b_mask_file))
             b_use_mask = True
             b_use_init = True
-        else:
+        elif b_use_mask == False:
             b_mask_file = ""
             b_mask_contrast_adjust = 1.0
             b_mask_brightness_adjust = 1.0
@@ -1983,7 +1980,7 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
                                            b_init_sample, b_strength,
                                            b_use_mask, b_mask_file,
                                            b_mask_contrast_adjust,
-                                           b_mask_brightness_adjust, b_invert_mask,
+                                           b_mask_brightness_adjust, b_invert_mask, b_maskmode,
                                            dynamic_threshold=None, static_threshold=None, C=4, f=8, init_c=None)
                     else:
                         images = generate_diff(b_prompts[iprompt], b_n_samples, b_n_batch, b_steps, b_scale)
@@ -3092,19 +3089,19 @@ with demo:
             with gr.Row():
                 with gr.Column():
                     with gr.Row():
-                        i_maskmode = gr.Radio(label="crop mode", choices=['uncrop', 'inpaint'], interactive=True, value='inpaint', visible=False)
+                        i_maskmode = gr.Radio(label="crop mode", choices=['uncrop', 'inpaint'], interactive=True, value='uncrop', visible=True)
                         i_path_to_view = gr.Dropdown(label='Images', choices=batch_pathlist)
                     refresh_btn = gr.Button('Refresh')
                     i_init_img_array = gr.Image(value=inPaint, source="upload", interactive=True,
                                                                       type="pil", tool="sketch", visible=True,
                                                                       elem_id="mask")
-                    i_outpaint = gr.Image(visible=False)
+                    i_outpaint = gr.Image(visible=True)
 
                     i_prompts = gr.Textbox(label='Prompts',
                                 placeholder='a beautiful forest by Asher Brown Durand, trending on Artstation\na beautiful city by Asher Brown Durand, trending on Artstation',
                                 lines=1)#animation_prompts
                     inPaint_btn = gr.Button('Inpaint')
-                    i_outpaint_btn = gr.Button('Uncrop', visible=False)
+                    i_outpaint_btn = gr.Button('Uncrop', visible=True)
 
                     i_strength = gr.Slider(minimum=0, maximum=1, step=0.01, label='Init Image Strength', value=0.01, interactive=True)#strength
                     i_batch_name = gr.Textbox(label='Batch Name',  placeholder='Batch_001', lines=1, value='SDAnim', interactive=True)#batch_name
