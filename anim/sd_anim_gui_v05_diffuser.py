@@ -31,7 +31,6 @@ from gfpgan import GFPGANer
 from io import BytesIO
 import fire
 import gc
-from perlin import perlinNoise
 
 #Prompt-to-Promtp image editing
 from transformers import CLIPModel, CLIPTextModel, CLIPTokenizer
@@ -2731,28 +2730,32 @@ def anim(animation_mode, animation_prompts, key_frames,
 
 def imgproc(p_image, p_proc, p_esrgan2x, p_esrgan4x, p_scale_W, p_scale_H, p_outdir):
     timestring = time.strftime('%Y%m%d%H%M%S')
-    os.makedirs(f'{outdir}/_lab', exist_ok=True)
+    os.makedirs(f'{p_outdir}/_lab', exist_ok=True)
     results = []
     print(p_proc)
     if "GFPGAN + RealESGAN" in p_proc:
         bg_upsampling = True
         p_image = FACE_RESTORATION(p_image, bg_upsampling, p_esrgan2x).astype(np.uint8)
         p_image = Image.fromarray(p_image)
-        path = f'{outdir}/_lab/{timestring}_{GFPGAN}.png'
+        path = f'{p_outdir}/_lab/{timestring}_{GFPGAN}.png'
         p_image.save(path)
         results.append(path)
+        p_image = np.array(p_image).astype(np.uint8)
+
     if "RealESGAN" in p_proc:
-        RealESRGAN = load_RealESRGAN('RealESRGAN_x4plus')
-        result, res = RealESRGAN.enhance(np.array(p_image, dtype=np.uint8))
-        p_image = Image.fromarray(result)
-        path = f'{outdir}/_lab/{timestring}_{ESRGAN}.png'
+        p_image = Image.fromarray(p_image)
+        p_image = processRealESRGAN(p_image)
+        path = f'{p_outdir}/_lab/{timestring}_ESRGAN.png'
         p_image.save(path)
         results.append(path)
+        p_image = np.array(p_image).astype(np.uint8)
 
         #p_image = esrGAN(p_image, p_esrgan4x)
-    if "" in p_proc:
+    if "Resize Only" in p_proc:
+        p_image = Image.fromarray(p_image)
+
         p_image = resize_image(2, p_image, p_scale_W, p_scale_H)
-        path = f'{outdir}/_lab/{timestring}_{resize}.png'
+        path = f'{p_outdir}/_lab/{timestring}_resize.png'
         p_image.save(path)
         results.append(path)
     return results
@@ -3268,7 +3271,7 @@ with demo:
                     p_image = gr.Image()
                     p_proc = gr.CheckboxGroup(choices = imgproc_choices)
                     p_esrgan2x = gr.Slider(minimum=1, maximum=8, step=1, label='GFPGAN + RealESGAN', value=1, interactive=True)
-                    p_esrgan4x = gr.Slider(minimum=1, maximum=8, step=1, label='RealESGAN', value=1, interactive=True)
+                    p_esrgan4x = gr.Slider(minimum=1, maximum=8, step=1, label='RealESGAN', value=1, interactive=True, visible=False)
                     with gr.Row():
                         p_scale_W = gr.Slider(minimum=64, maximum=2048, step=64, label='Width', value=512, interactive=True)
                         p_scale_H = gr.Slider(minimum=64, maximum=2048, step=64, label='Height', value=512, interactive=True)
