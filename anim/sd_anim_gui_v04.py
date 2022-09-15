@@ -31,7 +31,7 @@ import fire
 import gc
 
 #Prompt-to-Promtp image editing
-from transformers import CLIPModel, CLIPTextModel, CLIPTokenizer
+from transformers import CLIPModel, CLIPTextModel, CLIPTokenizer, CLIPFeatureExtractor
 from diffusers import AutoencoderKL, UNet2DConditionModel
 
 parser = argparse.ArgumentParser()
@@ -1418,6 +1418,8 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
 
                             image.save(os.path.join(b_outdir, b_filename))
                             b_outputs.append(b_fpath)
+
+                            yield gr.update(value=b_outputs), gr.update(visible=False)
                         #if b_display_samples:
                         #    display.display(image)
                         index += 1
@@ -1480,7 +1482,7 @@ def run_batch(b_prompts, b_name, b_outdir, b_GFPGAN, b_bg_upsampling,
 
         torch_gc()
 
-        return b_outputs, gr.Dropdown.update(choices=batch_path_list)
+        yield gr.update(value=b_outputs), gr.Dropdown.update(visible=True, choices=batch_path_list)
 
 #Animation by Deforum
 

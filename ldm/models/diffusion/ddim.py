@@ -127,6 +127,8 @@ class DDIMSampler(object):
         if x_T is None:
             img = torch.randn(shape, device=device)
         else:
+
+
             img = x_T
 
         if timesteps is None:
@@ -149,8 +151,9 @@ class DDIMSampler(object):
             if mask is not None:
                 assert x0 is not None
                 img_orig = self.model.q_sample(x0, ts)  # TODO: deterministic forward pass?
-                img = img_orig * mask + (1. - mask) * img
-
+                #img = img_orig * mask + (1. - mask) * img
+                tmp_mask = (mask > (1 - (step / 1000))) * 1
+                img = img_orig_with_noise * tmp_mask + (1. - tmp_mask) * img
             outs = self.p_sample_ddim(img, cond, ts, index=index, use_original_steps=ddim_use_original_steps,
                                       quantize_denoised=quantize_denoised, temperature=temperature,
                                       noise_dropout=noise_dropout, score_corrector=score_corrector,
