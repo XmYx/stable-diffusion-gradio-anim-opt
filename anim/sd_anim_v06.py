@@ -54,9 +54,22 @@ def model_loader(models):
 		if "sd14" not in loaded_models:
 			model = load_model_from_config(defaults.configs.sd, defaults.models.sd)
 			loaded_models.append("sd14")
+	else:
+
 	if "GFPGAN" in models:
 		if "gfpgan" not in loaded_models:
-			model = load_model_from_config(defaults.configs.gfpgan, defaults.models.gfpgan)
+		    model_name = 'GFPGANv1.3'
+		    model_path = '/content/models/GFPGANv1.3.pth'
+		    restorer = GFPGANer(
+		        model_path=model_path,
+		        upscale=1,
+		        arch=arch,
+		        channel_multiplier=channel_multiplier,
+		        bg_upsampler=None)
+
+
+
+
 			loaded_models.append("gfpgan")
 
 

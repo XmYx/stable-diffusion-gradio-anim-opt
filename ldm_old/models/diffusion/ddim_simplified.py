@@ -114,7 +114,7 @@ class DDIMSampler(object):
 
             ts = full((batch_size,), step, device=device,
                             dtype=long)  # unique int, as a tensor
-
+            
             # equivalent to ts = tensor([step]*batch_size).to(device)
 
             # print(f"step {step}")
