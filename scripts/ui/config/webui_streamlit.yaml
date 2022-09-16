@@ -5,10 +5,10 @@
 general:
     gpu: 0
     outdir: outputs
-    ckpt: "content/models/sd-v1-4.ckpt"
-    default_model: "Stable Diffusion v1.4" 
+    ckpt: "/gdrive/MyDrive/sd-v1-4.ckpt"
+    default_model: "Stable Diffusion v1.4"
     default_model_config: "configs/stable-diffusion/v1-inference.yaml"
-    default_model_path: "models/ldm/stable-diffusion-v1/model.ckpt"
+    default_model_path: "/gdrive/MyDrive/sd-v1-4.ckpt"
     fp:
         name: ''
     GFPGAN_dir: "./src/gfpgan"
@@ -61,7 +61,7 @@ txt2img:
     variant_amount: 0.0
     variant_seed: ""
     write_info_files: True
-    
+
 txt2vid:
     default_model: "CompVis/stable-diffusion-v1-4"
     custom_models_list: ["CompVis/stable-diffusion-v1-4", "naclbit/trinart_stable_diffusion_v2", "hakurei/waifu-diffusion", "osanseviero/BigGAN-deep-128"]
