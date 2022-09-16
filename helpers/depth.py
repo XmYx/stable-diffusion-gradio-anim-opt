@@ -24,7 +24,7 @@ class DepthModel():
         self.device = device
         self.midas_model = None
         self.midas_transform = None
-
+    
     def load_adabins(self):
         if not os.path.exists('pretrained/AdaBins_nyu.pt'):
             print("Downloading AdaBins_nyu.pt...")
@@ -57,7 +57,7 @@ class DepthModel():
             PrepareForNet()
         ])
 
-        self.midas_model.eval()
+        self.midas_model.eval()    
         if half_precision and self.device == torch.device("cuda"):
             self.midas_model = self.midas_model.to(memory_format=torch.channels_last)
             self.midas_model = self.midas_model.half()
@@ -66,7 +66,7 @@ class DepthModel():
     def predict(self, prev_img_cv2, anim_args) -> torch.Tensor:
         w, h = prev_img_cv2.shape[1], prev_img_cv2.shape[0]
 
-        # predict depth with AdaBins
+        # predict depth with AdaBins    
         use_adabins = anim_args.midas_weight < 1.0 and self.adabins_helper is not None
         if use_adabins:
             MAX_ADABINS_AREA = 500000
@@ -94,7 +94,7 @@ class DepthModel():
                     _, adabins_depth = self.adabins_helper.predict_pil(depth_input)
                 if resized:
                     adabins_depth = TF.resize(
-                        torch.from_numpy(adabins_depth),
+                        torch.from_numpy(adabins_depth), 
                         torch.Size([h, w]),
                         interpolation=TF.InterpolationMode.BICUBIC
                     )
@@ -112,9 +112,9 @@ class DepthModel():
             # MiDaS depth estimation implementation
             sample = torch.from_numpy(img_midas_input).float().to(self.device).unsqueeze(0)
             if self.device == torch.device("cuda"):
-                sample = sample.to(memory_format=torch.channels_last)
+                sample = sample.to(memory_format=torch.channels_last)  
                 sample = sample.half()
-            with torch.no_grad():
+            with torch.no_grad():            
                 midas_depth = self.midas_model.forward(sample)
             midas_depth = torch.nn.functional.interpolate(
                 midas_depth.unsqueeze(1),
@@ -139,7 +139,7 @@ class DepthModel():
             depth_tensor = torch.from_numpy(depth_map).squeeze().to(self.device)
         else:
             depth_tensor = torch.ones((h, w), device=self.device)
-
+        
         return depth_tensor
 
     def save(self, filename: str, depth: torch.Tensor):
@@ -152,4 +152,5 @@ class DepthModel():
         denom = max(1e-8, self.depth_max - self.depth_min)
         temp = rearrange((depth - self.depth_min) / denom * 255, 'c h w -> h w c')
         temp = repeat(temp, 'h w 1 -> h w c', c=3)
-        Image.fromarray(temp.astype(np.uint8)).save(filename)
+        Image.fromarray(temp.astype(np.uint8)).save(filename)    
+
