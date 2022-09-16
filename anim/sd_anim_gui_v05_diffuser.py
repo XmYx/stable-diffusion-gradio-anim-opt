@@ -1,4 +1,5 @@
 import json
+#from pickle import FALSE
 import threading, asyncio, argparse, math, os, pathlib, shutil, subprocess, sys, time, string
 import cv2
 import numpy as np
@@ -1672,7 +1673,6 @@ def generate(prompt, name, outdir, GFPGAN, bg_upsampling, upscale, W, H, steps, 
                                                             unconditional_guidance_scale=scale,
                                                             unconditional_conditioning=uc,
                                                             eta=ddim_eta,
-                                                            mask=mask,
                                                             x_T=z_enc,
                                                             img_callback=callback)
                         else:
