@@ -7,17 +7,19 @@ import os, sys, re, random, datetime, time, math
 
 
 #other imports
-sys.path.extend([
-    '/content/src/taming-transformers',
-    '/content/src/clip',
-    '/content/stable-diffusion-gradio-anim-opt/',
-    '/content/src/k-diffusion',
-    '/content/src/pytorch3d-lite',
-    '/content/src/AdaBins',
-    '/content/src/MiDaS',
-    '/content/soup',
-    '/content/src/Real-ESRGAN'
-])
+import platform
+if "Linux" in platform.platform():
+    sys.path.extend([
+        './src/taming-transformers',
+        './src/clip',
+        './',
+        './src/k-diffusion',
+        './src/pytorch3d-lite',
+        './src/AdaBins',
+        './src/MiDaS',
+        './soup',
+        './src/Real-ESRGAN'
+    ])
 import warnings
 import json
 
